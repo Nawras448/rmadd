@@ -1,0 +1,150 @@
+Screen {
+    layout: horizontal;
+}
+
+#sidebar {
+    width: 20%;
+    height: 100%;
+    background: $surface;
+    border-right: heavy $accent;
+    padding: 1;
+}
+
+#sidebar-title {
+    border-bottom: heavy $primary;
+    text-align: center;
+    text-style: bold;
+    padding: 1;
+}
+
+#content {
+    width: 80%;
+    height: 100%;
+    padding: 1;
+}
+
+#store-layout, #detail-layout {
+    width: 100%;
+    height: 100%;
+    padding: 1;
+}
+
+#filter-bar {
+    height: 3;
+    align: center middle;
+    margin: 1 0;
+}
+
+.filter-tag {
+    padding: 0 1;
+    &:hover {
+        background: $accent;
+    }
+}
+
+#search-input {
+    margin: 1 0;
+}
+
+DataTable {
+    height: 1fr;
+    margin: 1 0;
+}
+
+.monitor-card {
+    border: solid $primary;
+    padding: 1;
+    margin: 1;
+    height: auto;
+}
+
+.detail-card {
+    border: solid $accent;
+    padding: 2;
+    margin: 1;
+}
+
+#actions {
+    align: center middle;
+    height: 5;
+}
+
+#actions Button {
+    margin: 0 1;
+}
+
+#action-result {
+    text-align: center;
+    padding: 1;
+}
+
+#left-panel, #right-panel {
+    width: 50%;
+    height: 100%;
+}
+
+Button {
+    margin: 0 1;
+}
+
+#package-info {
+    padding: 1;
+}
+
+#system-card {
+    border: solid $primary;
+    padding: 1;
+    margin: 1;
+}
+
+#package-table {
+    border: solid $accent;
+    padding: 1;
+    margin: 1;
+    height: 1fr;
+}
+
+#full-system-content {
+    width: 100%;
+    height: 100%;
+    padding: 1;
+    overflow-y: auto;
+}
+
+.fs-section {
+    border: solid $surface;
+    padding: 1;
+    margin: 0 0 1 0;
+    height: auto;
+}
+
+#action-bar {
+    height: 3;
+    align: center middle;
+    border: solid $accent;
+    padding: 0 1;
+    margin: 1 0;
+}
+
+#action-bar Button {
+    margin: 0 1;
+}
+
+.sel-label {
+    padding: 0 2;
+    text-style: bold;
+}
+
+#action-result-store {
+    text-align: center;
+    padding: 1;
+    height: 3;
+}
+
+#store-table {
+    height: 1fr;
+}
+
+#inner-table {
+    height: 100%;
+}
