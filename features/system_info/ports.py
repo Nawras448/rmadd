@@ -39,5 +39,9 @@ class SystemDataSource(ABC):
         pass
 
     @abstractmethod
+    def get_uptime(self) -> str:
+        pass
+
+    @abstractmethod
     def get_distribution(self) -> Distribution:
         pass

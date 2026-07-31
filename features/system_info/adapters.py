@@ -4,6 +4,27 @@ from features.system_info.ports import SystemDataSource
 from features.system_info.domain import Distribution
 
 
+def _read_uptime() -> str:
+    try:
+        with open("/proc/uptime") as f:
+            seconds = float(f.read().split()[0])
+        days, rem = divmod(int(seconds), 86400)
+        hours, rem = divmod(rem, 3600)
+        minutes, secs = divmod(rem, 60)
+        parts = []
+        if days:
+            parts.append(f"{days}d")
+        if hours:
+            parts.append(f"{hours}h")
+        if minutes:
+            parts.append(f"{minutes}m")
+        if secs or not parts:
+            parts.append(f"{secs}s")
+        return " ".join(parts)
+    except Exception:
+        return "Unknown"
+
+
 class HostnamectlAdapter(SystemDataSource):
     def get_hostname(self) -> str:
         try:
@@ -35,6 +56,9 @@ class HostnamectlAdapter(SystemDataSource):
             return subprocess.run(["hostnamectl"], capture_output=True, text=True).stdout.strip()
         except Exception:
             return ""
+
+    def get_uptime(self) -> str:
+        return _read_uptime()
 
     def get_distribution(self) -> Distribution:
         d = Distribution()
@@ -76,6 +100,9 @@ class LsbReleaseAdapter(SystemDataSource):
 
     def get_hostnamectl(self) -> str:
         return self._run(["hostnamectl"])
+
+    def get_uptime(self) -> str:
+        return _read_uptime()
 
     def get_distribution(self) -> Distribution:
         d = Distribution()

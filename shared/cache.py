@@ -33,7 +33,8 @@ class CachingSystemAdapter(_CacheMixin, SystemDataSource):
     def get_kernel(self) -> str: return self._cached("kernel", self._inner.get_kernel)
     def get_architecture(self) -> str: return self._cached("arch", self._inner.get_architecture)
     def get_hostnamectl(self) -> str: return self._cached("hostnamectl", self._inner.get_hostnamectl)
-    def get_distribution(self) -> Distribution: return self._inner.get_distribution()
+    def get_uptime(self) -> str: return self._cached("uptime", self._inner.get_uptime)
+    def get_distribution(self) -> Distribution: return self._cached("distribution", self._inner.get_distribution)
 
 
 class CachingHardwareAdapter(_CacheMixin, HardwareDataSource):

@@ -25,5 +25,7 @@ class GetSystemInfoService(GetSystemInfoUseCase):
             kernel=self._ds.get_kernel(),
             architecture=self._ds.get_architecture(),
             hostnamectl_output=self._ds.get_hostnamectl(),
+            uptime=self._ds.get_uptime(),
+            distribution=self._ds.get_distribution(),
         )
         return self._cache

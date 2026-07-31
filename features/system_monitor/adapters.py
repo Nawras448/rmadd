@@ -18,9 +18,15 @@ class _CpuReader:
         try:
             with open("/proc/cpuinfo") as f:
                 data = f.read()
+            phys_id = ""
+            physical_cores: set[tuple[str, str]] = set()
             for line in data.split("\n"):
                 if line.startswith("processor"):
-                    info.cores += 1
+                    info.threads += 1
+                elif line.startswith("physical id"):
+                    phys_id = line.split(":", 1)[-1].strip()
+                elif line.startswith("core id"):
+                    physical_cores.add((phys_id, line.split(":", 1)[-1].strip()))
                 if "model name" in line and not info.model:
                     info.model = line.split(":", 1)[-1].strip()
                 if "vendor_id" in line and not info.vendor:
@@ -34,7 +40,9 @@ class _CpuReader:
                     m = re.search(r"(\d+)", line)
                     if m:
                         info.cache_kb = int(m.group(1))
-            info.threads = os.cpu_count() or info.cores
+            info.cores = len(physical_cores) if physical_cores else (info.threads or os.cpu_count() or 0)
+            if info.threads == 0:
+                info.threads = os.cpu_count() or info.cores
             info.temperature_celsius = self._read_temp()
             info.usage_percent = self._calc_usage()
         except (FileNotFoundError, PermissionError):
@@ -98,45 +106,41 @@ class _DiskReader:
     def read(self) -> list:
         disks = []
         try:
-            raw_disks = self._list_devices()
-            for dev in raw_disks:
-                disk = self._enrich(dev)
-                if disk:
-                    disks.append(disk)
+            rows = self._list_mounts()
+            seen: set[str] = set()
+            for mount, source, fstype in rows:
+                if not source.startswith("/dev/"):
+                    continue
+                dev = source[len("/dev/"):]
+                if dev in seen or dev.startswith(("loop", "ram", "zram")):
+                    continue
+                seen.add(dev)
+                try:
+                    usage = shutil.disk_usage(mount)
+                except (PermissionError, FileNotFoundError, OSError):
+                    continue
+                disk = DiskInfo(device=dev, mount_point=mount, filesystem=fstype)
+                disk.total_gb = round(usage.total / (1024**3), 1)
+                disk.used_gb = round(usage.used / (1024**3), 1)
+                disk.available_gb = round(usage.free / (1024**3), 1)
+                disk.usage_percent = round(100.0 * usage.used / usage.total, 1) if usage.total > 0 else 0.0
+                disks.append(disk)
         except Exception:
             pass
         return disks
 
-    def _list_devices(self) -> list:
-        if shutil.which("lsblk"):
-            out = subprocess.run(["lsblk", "-ndo", "NAME,SIZE,MOUNTPOINT,FSTYPE", "-e", "7,1"],
-                                 capture_output=True, text=True, timeout=10).stdout.strip()
-            return [line.split() for line in out.split("\n") if line]
-        with open("/proc/partitions") as f:
-            return [[parts[3]] for line in f.readlines()[2:] if (parts := line.split()) and len(parts) >= 4 and not parts[3].isdigit()]
-
-    def _enrich(self, parts: list) -> Optional[DiskInfo]:
-        dev = parts[0]
-        disk = DiskInfo(device=dev)
-        try:
-            usage = shutil.disk_usage(dev if dev.startswith("/") else f"/dev/{dev}")
-            disk.mount_point = parts[2] if len(parts) > 2 and parts[2] else ""
-        except (PermissionError, FileNotFoundError, OSError):
-            for mount in ["/", "/home", "/var"]:
-                try:
-                    usage = shutil.disk_usage(mount)
-                    disk.mount_point = mount
-                    break
-                except (PermissionError, FileNotFoundError, OSError):
-                    continue
-            else:
-                return None
-        disk.total_gb = round(usage.total / (1024**3), 1)
-        disk.used_gb = round(usage.used / (1024**3), 1)
-        disk.available_gb = round(usage.free / (1024**3), 1)
-        disk.usage_percent = round(100.0 * usage.used / usage.total, 1) if usage.total > 0 else 0.0
-        disk.filesystem = parts[3] if len(parts) > 3 else ""
-        return disk
+    def _list_mounts(self) -> list:
+        if shutil.which("findmnt"):
+            out = subprocess.run(["findmnt", "-rno", "TARGET,SOURCE,FSTYPE"],
+                                 capture_output=True, text=True, timeout=10).stdout
+            return [line.split(None, 2) for line in out.split("\n") if line.strip()]
+        rows = []
+        with open("/proc/self/mounts") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 3:
+                    rows.append((parts[1], parts[0], parts[2]))
+        return rows
 
 
 class _GpuReader:
@@ -145,9 +149,17 @@ class _GpuReader:
             out = subprocess.run(["lspci"], capture_output=True, text=True, timeout=10).stdout.strip()
             for line in out.split("\n"):
                 if any(x in line.lower() for x in ["vga", "3d", "display"]):
-                    parts = line.strip().split(":", 2)
-                    return GpuInfo(model=parts[-1].strip() if len(parts) >= 3 else line.strip(),
-                                   vendor=parts[0].strip())
+                    rest = line.strip()
+                    _, _, rest = rest.partition(":")
+                    _, _, desc = rest.partition(":")
+                    model = desc.strip() or rest.strip()
+                    vendor = ""
+                    for name in ("NVIDIA Corporation", "Intel Corporation", "Advanced Micro Devices, Inc.",
+                                 "AMD/ATI", "ASPEED Technology"):
+                        if model.startswith(name):
+                            vendor = name
+                            break
+                    return GpuInfo(model=model, vendor=vendor)
         except Exception:
             pass
         return None

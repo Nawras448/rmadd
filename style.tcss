@@ -29,26 +29,101 @@ Screen {
     padding: 1;
 }
 
-#filter-bar {
+#store-tabs {
+    height: 1fr;
+    width: 100%;
+    padding: 0 1;
+}
+
+TabbedContent > ContentTabs {
+    dock: top;
+    height: 3;
+    background: $panel;
+    border-bottom: solid $accent;
+}
+
+TabbedContent Tab {
+    height: 1;
+    padding: 0 2;
+    text-align: center;
+    color: $foreground 60%;
+}
+
+TabbedContent Tab.-active {
+    color: $text;
+    background: $accent;
+}
+
+TabbedContent > ContentSwitcher {
+    height: 1fr;
+}
+
+TabPane {
+    height: 100%;
+    border: solid $accent;
+    padding: 1;
+}
+
+#tools-table {
+    height: auto;
+    margin: 0;
+}
+
+#search-table, #installed-table {
+    height: 1fr;
+    margin: 0 0 0 0;
+}
+
+#tools-action-bar, #search-action-bar, #installed-action-bar {
     height: 3;
     align: center middle;
-    margin: 1 0;
-}
-
-.filter-tag {
+    border: solid $accent;
     padding: 0 1;
-    &:hover {
-        background: $accent;
-    }
+    margin: 0;
 }
 
-#search-input {
-    margin: 1 0;
+#tools-action-bar Button, #search-action-bar Button, #installed-action-bar Button {
+    margin: 0 1;
+}
+
+#search-top, #installed-top {
+    height: 3;
+    align: center middle;
+    margin: 0;
+}
+
+#search-top Input, #installed-top Input {
+    width: 1fr;
+    margin: 0;
+}
+
+#search-managers, #installed-managers {
+    height: 3;
+    align: left middle;
+    margin: 0;
+}
+
+#search-managers Checkbox, #installed-managers Checkbox {
+    margin: 0 1 0 0;
+}
+
+#search-managers #all, #installed-managers #all {
+    text-style: bold;
+    margin-right: 3;
+}
+
+#tools-result, #search-result, #installed-result {
+    height: 1;
+    background: $panel;
+    border-top: dashed $primary;
+    text-align: center;
+    padding: 0 2;
+    width: 100%;
 }
 
 DataTable {
     height: 1fr;
-    margin: 1 0;
+    margin: 0;
 }
 
 .monitor-card {
@@ -74,8 +149,12 @@ DataTable {
 }
 
 #action-result {
+    height: 3;
+    background: $panel;
+    border-top: heavy $primary;
     text-align: center;
-    padding: 1;
+    padding: 0 2;
+    width: 100%;
 }
 
 #left-panel, #right-panel {
@@ -136,13 +215,12 @@ Button {
 }
 
 #action-result-store {
-    text-align: center;
-    padding: 1;
     height: 3;
-}
-
-#store-table {
-    height: 1fr;
+    background: $panel;
+    border-top: heavy $primary;
+    text-align: center;
+    padding: 0 2;
+    width: 100%;
 }
 
 #inner-table {

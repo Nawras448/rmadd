@@ -1,4 +1,12 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+@dataclass
+class Distribution:
+    id: str = ""
+    version: str = ""
+    codename: str = ""
+    pretty_name: str = ""
 
 
 @dataclass
@@ -9,11 +17,4 @@ class SystemInfo:
     architecture: str = ""
     hostnamectl_output: str = ""
     uptime: str = ""
-
-
-@dataclass
-class Distribution:
-    id: str = ""
-    version: str = ""
-    codename: str = ""
-    pretty_name: str = ""
+    distribution: Distribution = field(default_factory=Distribution)

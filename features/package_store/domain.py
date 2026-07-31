@@ -55,6 +55,11 @@ class PackageCollection:
     def by_manager(self, manager: PackageManager) -> "PackageCollection":
         return self.filter(lambda p: p.manager == manager)
 
+    def by_managers(self, managers) -> "PackageCollection":
+        if not managers:
+            return self
+        return self.filter(lambda p: p.manager in managers)
+
     def search(self, query: str) -> "PackageCollection":
         q = query.lower()
         return self.filter(

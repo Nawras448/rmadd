@@ -40,12 +40,18 @@ class DashboardScreen(Screen):
         asyncio.create_task(self._load_package_counts())
 
     async def _load_system_info(self):
-        info = await asyncio.to_thread(self._ss.get_system_info)
-        self.query_one("#system-card", SystemCard).display_info(info)
+        try:
+            info = await asyncio.to_thread(self._ss.get_system_info)
+            self.query_one("#system-card", SystemCard).display_info(info)
+        except Exception as e:
+            self.query_one("#system-card", SystemCard).update(f"[bold red]Error loading system info: {e}[/bold red]")
 
     async def _load_package_counts(self):
-        counts = await asyncio.to_thread(self._ps.get_all_counts)
-        self.query_one("#package-table", PackageTable).show_counts(counts)
+        try:
+            counts = await asyncio.to_thread(self._ps.get_all_counts)
+            self.query_one("#package-table", PackageTable).show_counts(counts)
+        except Exception as e:
+            self.query_one("#package-table", PackageTable).show_counts({"error": str(e)})
 
     def on_button_pressed(self, event: Button.Pressed):
         if event.button.id == "btn_full_system":

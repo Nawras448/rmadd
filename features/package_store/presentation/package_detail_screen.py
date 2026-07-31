@@ -3,11 +3,17 @@ import asyncio
 from textual.screen import Screen
 from textual.widgets import Header, Footer, Static, Button
 from textual.containers import Horizontal, Vertical
+from textual.binding import Binding
 
 from features.package_store.domain import Package
 
 
 class PackageDetailScreen(Screen):
+    BINDINGS = [
+        Binding("escape", "dismiss", "Back"),
+        Binding("i", "quick_install", "Install"),
+    ]
+
     def __init__(self, pkg: Package, package_service):
         super().__init__()
         self._pkg = pkg
@@ -39,22 +45,32 @@ class PackageDetailScreen(Screen):
         self.query_one("#package-info", Static).update(info)
 
     async def on_button_pressed(self, event: Button.Pressed):
+        action = {
+            "btn-install": "install",
+            "btn-remove": "remove",
+            "btn-update": "update",
+        }.get(event.button.id)
+        if action:
+            await self._run_action(action)
+
+    async def action_quick_install(self):
+        await self._run_action("install")
+
+    async def _run_action(self, action: str):
         result = self.query_one("#action-result", Static)
         name = self._pkg.name
         mgr = self._pkg.manager
-
+        labels = {
+            "install": ("📥 Installing", "Install"),
+            "remove": ("🗑 Removing", "Remove"),
+            "update": ("🔄 Updating", "Update"),
+        }
+        emoji, title = labels[action]
         try:
-            if event.button.id == "btn-install":
-                result.update("[yellow]Installing...[/yellow]")
-                ok = await asyncio.to_thread(self._ps.install, name, mgr)
-                result.update(f"[bold]{'✓' if ok else '✗'} Install {'succeeded' if ok else 'failed'}[/bold]")
-            elif event.button.id == "btn-remove":
-                result.update("[yellow]Removing...[/yellow]")
-                ok = await asyncio.to_thread(self._ps.remove, name, mgr)
-                result.update(f"[bold]{'✓' if ok else '✗'} Remove {'succeeded' if ok else 'failed'}[/bold]")
-            elif event.button.id == "btn-update":
-                result.update("[yellow]Updating...[/yellow]")
-                ok = await asyncio.to_thread(self._ps.update, name, mgr)
-                result.update(f"[bold]{'✓' if ok else '✗'} Update {'succeeded' if ok else 'failed'}[/bold]")
+            result.update(f"[yellow]{emoji} {title} {name}...[/yellow]")
+            method = getattr(self._ps, action)
+            ok = await asyncio.to_thread(method, name, mgr)
+            icon = "✓" if ok else "✗"
+            result.update(f"[bold]{icon} {title} {'succeeded' if ok else 'failed'} ({name})[/bold]")
         except Exception as e:
             result.update(f"[bold red]Error: {e}[/bold red]")

@@ -1,3 +1,4 @@
+import os
 import subprocess
 import shutil
 from typing import Optional
@@ -21,12 +22,39 @@ class _BaseAdapter(PackageDataSource):
 
     def _run_priv(self, cmd: list, timeout: int = 300) -> bool:
         if not self._available:
-            return False
-        try:
-            subprocess.run(["pkexec"] + cmd, timeout=timeout)
-            return True
-        except Exception:
-            return False
+            raise RuntimeError(f"{self._manager.value} is not available on this system")
+        if os.geteuid() == 0:
+            try:
+                subprocess.run(cmd, timeout=timeout, capture_output=True, text=True, check=True)
+                return True
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(f"Command failed (exit {e.returncode})")
+            except Exception as e:
+                raise RuntimeError(str(e))
+        for tool in ("pkexec", "sudo"):
+            priv = shutil.which(tool)
+            if not priv:
+                continue
+            try:
+                result = subprocess.run(
+                    [priv] + cmd, timeout=timeout,
+                    capture_output=True, text=True
+                )
+                if result.returncode == 0:
+                    return True
+                err = result.stderr.strip()
+                if not err or "cancelled" in err.lower():
+                    return False
+                if tool == "pkexec" and ("not authorized" in err.lower() or "no authentication agent" in err.lower()):
+                    continue
+                raise RuntimeError(err)
+            except subprocess.TimeoutExpired:
+                raise RuntimeError("Command timed out")
+            except RuntimeError:
+                raise
+            except Exception as e:
+                raise RuntimeError(str(e))
+        raise RuntimeError("No privilege escalation tool available (need pkexec or sudo)")
 
     def install(self, name: str) -> bool:
         return self._run_priv(self._install_cmd(name))
@@ -188,10 +216,22 @@ class FlatpakAdapter(_BaseAdapter):
     def __init__(self):
         super().__init__("flatpak", PackageManager.FLATPAK)
 
+    @staticmethod
+    def _is_header(line: str) -> bool:
+        first = line.split("\t")[0].lower()
+        if first not in ("name", "application"):
+            return False
+        return any(w in line.lower() for w in ("application id", "description", "branch", "remotes", "options", "version"))
+
+    def _iter_rows(self, out: str) -> list:
+        lines = [ln for ln in out.split("\n") if ln.strip()]
+        if lines and self._is_header(lines[0]):
+            lines = lines[1:]
+        return lines
+
     def list_installed(self) -> list:
-        out = self._run(["flatpak", "list", "--columns=application,version,arch", "--app"])
         pkgs = []
-        for line in out.split("\n")[1:]:
+        for line in self._iter_rows(self._run(["flatpak", "list", "--columns=application,version,arch", "--app"])):
             parts = line.split("\t")
             if parts[0].strip():
                 pkgs.append(Package(name=parts[0].strip(), version=parts[1].strip() if len(parts) > 1 else "",
@@ -199,13 +239,13 @@ class FlatpakAdapter(_BaseAdapter):
         return pkgs
 
     def search(self, query: str) -> list:
-        out = self._run(["flatpak", "search", query])
         pkgs = []
-        for line in out.split("\n")[1:]:
+        for line in self._iter_rows(self._run(["flatpak", "search", query])):
             parts = line.split("\t")
-            if parts[0].strip():
-                pkgs.append(Package(name=parts[0].strip(), summary=parts[2].strip() if len(parts) > 2 else "",
-                                    manager=self._manager))
+            if parts and parts[0].strip():
+                name = parts[2].strip() if len(parts) > 2 else parts[0].strip()
+                summary = parts[1].strip() if len(parts) > 1 else ""
+                pkgs.append(Package(name=name, summary=summary, manager=self._manager))
         return pkgs
 
     def get_info(self, name: str) -> Optional[Package]:
@@ -222,8 +262,7 @@ class FlatpakAdapter(_BaseAdapter):
         return pkg
 
     def count(self) -> int:
-        out = self._run(["flatpak", "list", "--app"])
-        return max(0, len(out.split("\n")) - 1) if out else 0
+        return len(self._iter_rows(self._run(["flatpak", "list", "--app"])))
 
     def _install_cmd(self, name: str) -> list: return ["flatpak", "install", "--noninteractive", "-y", name]
     def _remove_cmd(self, name: str) -> list: return ["flatpak", "uninstall", "--noninteractive", "-y", name]
@@ -231,8 +270,7 @@ class FlatpakAdapter(_BaseAdapter):
     def _update_all_cmd(self) -> list: return ["flatpak", "update", "--noninteractive", "-y"]
 
     def list_repos(self) -> list:
-        out = self._run(["flatpak", "remotes"])
-        return [Repo(name=line.split()[0]) for line in out.split("\n")[1:] if line.strip()]
+        return [Repo(name=line.split()[0]) for line in self._iter_rows(self._run(["flatpak", "remotes"]))]
 
 
 class SnapAdapter(_BaseAdapter):

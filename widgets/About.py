@@ -25,12 +25,11 @@ class About(Static):
 
     async def _load_system_info(self):
         info = await asyncio.to_thread(self._sys_info.get_system_info)
-        info2 = await asyncio.to_thread(self._sys_info.get_system_info)
         self.query_one("#about-system", Static).update(
             f"                 system info\n\nHostname: {info['hostname']}\nOS: {info['os']}\n"
         )
         self.query_one("#about-hostnamectl", Static).update(
-            f"hostnamectl : {info2['hostnamectl']}\n\n"
+            f"hostnamectl : {info['hostnamectl']}\n\n"
         )
 
     async def _load_package_counts(self):
