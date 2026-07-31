@@ -1,32 +1,40 @@
+import asyncio
+
 from textual.app import ComposeResult
-from textual.widgets import Static
-from textual.containers import Vertical , Horizontal
+from textual.widgets import Static, Label
+from textual.containers import Vertical, Horizontal
 from core.core import SystemInfo
-from textual.widgets import Button, Label, Static
 
-
-sys_info = SystemInfo()
-system_info = sys_info.get_system_info()
-system_info2 = sys_info.get_system_info()
 
 class About(Static):
+    def __init__(self):
+        super().__init__()
+        self._sys_info = SystemInfo()
 
     def compose(self) -> ComposeResult:
         yield Label("                   Developer\n\n# Developed by Nawras - Software Developer\n# GitHub: https://github.com/Nawras448\n")
-        yield Static(f"                 system info\n\nHostname: {system_info['hostname']}\nOS: {system_info['os']}\n")
-        yield Static(f"hostnamectl : {system_info2['hostnamectl']}\n\n")
+        yield Static("[yellow]Loading system info...[/yellow]", id="about-system")
+        yield Static("", id="about-hostnamectl")
         yield Static("\nNumber of programs on the device\n", id="programs-title")
-        yield Vertical(id="packages-list") ## خيار عرض برنامج
+        yield Vertical(id="packages-list")
         yield Horizontal(id="About_system")
 
-    
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
+        asyncio.create_task(self._load_system_info())
+        asyncio.create_task(self._load_package_counts())
 
-        
+    async def _load_system_info(self):
+        info = await asyncio.to_thread(self._sys_info.get_system_info)
+        info2 = await asyncio.to_thread(self._sys_info.get_system_info)
+        self.query_one("#about-system", Static).update(
+            f"                 system info\n\nHostname: {info['hostname']}\nOS: {info['os']}\n"
+        )
+        self.query_one("#about-hostnamectl", Static).update(
+            f"hostnamectl : {info2['hostnamectl']}\n\n"
+        )
+
+    async def _load_package_counts(self):
         container = self.query_one("#packages-list", Vertical)
-
-        # جلب القاموس الذي يحتوي فقط على مديري الحزم الشغالين في جهاز المستخدم
-        all_counts = sys_info.get_all_counts()
-
+        all_counts = await asyncio.to_thread(self._sys_info.get_all_counts)
         for manager, count in all_counts.items():
             container.mount(Static(f"{manager.upper()} Count: {count}"))

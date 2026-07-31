@@ -1,3 +1,5 @@
+import asyncio
+
 from textual.screen import Screen
 from textual.widgets import Header, Footer, Static
 from textual.containers import Horizontal, Vertical
@@ -28,12 +30,15 @@ class HardwareMonitorScreen(Screen):
                 yield Static(id="network-info", classes="monitor-card")
         yield Footer()
 
-    def on_mount(self):
-        self._refresh()
+    async def on_mount(self):
+        await self._refresh()
         self._timer = self.set_interval(2, self._refresh)
 
-    def _refresh(self):
-        report = self._hw.get_full_report()
+    async def _refresh(self):
+        report = await asyncio.to_thread(self._hw.get_full_report)
+        self._update_ui(report)
+
+    def _update_ui(self, report: HardwareReport):
         cpu_graph = self.query_one("#cpu-graph", CpuGraph)
         cpu_graph.update_cpu(report.cpu)
 

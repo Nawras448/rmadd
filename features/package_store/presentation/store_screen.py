@@ -1,3 +1,5 @@
+import asyncio
+
 from textual.screen import Screen
 from textual.widgets import Header, Footer, Static, Input, DataTable, Button
 from textual.containers import Horizontal, Vertical
@@ -52,21 +54,26 @@ class StoreScreen(Screen):
         parts = key.split("|", 1) if "|" in key else (key, "")
         return (parts[0], parts[1]) if len(parts) == 2 else ("", "")
 
-    def on_mount(self):
-        self._show_all()
+    async def on_mount(self):
         self._update_actions()
         self.query_one("#inner-table", DataTable).focus()
+        asyncio.create_task(self._do_load_all())
 
     def _show_all(self, manager=None):
-        if manager:
-            pkgs = self._ps.list_installed(manager)
-        else:
-            pkgs = self._ps.list_installed()
+        self._current_manager = manager
+        asyncio.create_task(self._do_load_all())
+
+    async def _do_load_all(self):
+        mgr = self._current_manager
+        pkgs = await asyncio.to_thread(self._ps.list_installed, mgr)
         self.query_one("#store-table", PackageTable).show_packages(pkgs)
         self._table_changed()
 
     def _show_search(self, query: str, manager=None):
-        results = self._ps.search(query, manager)
+        asyncio.create_task(self._do_search(query, manager))
+
+    async def _do_search(self, query: str, manager=None):
+        results = await asyncio.to_thread(self._ps.search, query, manager)
         self.query_one("#store-table", PackageTable).show_packages(results)
         self._table_changed()
 
@@ -76,10 +83,7 @@ class StoreScreen(Screen):
 
     def on_input_submitted(self, event: Input.Submitted):
         query = event.value.strip()
-        if not query:
-            self._show_all(self._current_manager)
-        else:
-            self._show_search(query, self._current_manager)
+        self._show_search(query, self._current_manager)
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted):
         self._update_actions()
@@ -98,14 +102,17 @@ class StoreScreen(Screen):
         self._open_detail()
 
     def _open_detail(self):
+        asyncio.create_task(self._do_open_detail())
+
+    async def _do_open_detail(self):
         name, mgr_str = self._get_cursor_row()
         if not name or not mgr_str:
             return
-        pkg = self._ps.get_package_detail(name, PackageManager(mgr_str))
+        pkg = await asyncio.to_thread(self._ps.get_package_detail, name, PackageManager(mgr_str))
         if pkg:
             self.app.push_screen(PackageDetailScreen(pkg, self._ps))
 
-    def on_button_pressed(self, event: Button.Pressed):
+    async def on_button_pressed(self, event: Button.Pressed):
         for mgr in PackageManager:
             if event.button.id == f"filter-{mgr.value}":
                 self._current_manager = mgr if self._current_manager != mgr else None
@@ -114,15 +121,15 @@ class StoreScreen(Screen):
                 return
 
         if event.button.id == "btn-install":
-            self._do_action("install")
+            await self._do_action("install")
         elif event.button.id == "btn-remove":
-            self._do_action("remove")
+            await self._do_action("remove")
         elif event.button.id == "btn-update":
-            self._do_action("update")
+            await self._do_action("update")
         elif event.button.id == "btn-details":
             self._open_detail()
 
-    def _do_action(self, action: str):
+    async def _do_action(self, action: str):
         name, mgr_str = self._get_cursor_row()
         if not name or not mgr_str:
             return
@@ -131,27 +138,27 @@ class StoreScreen(Screen):
         try:
             if action == "install":
                 result.update("[yellow]Installing...[/yellow]")
-                ok = self._ps.install(name, mgr)
+                ok = await asyncio.to_thread(self._ps.install, name, mgr)
                 result.update(f"[bold]{'✓' if ok else '✗'} Install {'succeeded' if ok else 'failed'}[/bold]")
             elif action == "remove":
                 result.update("[yellow]Removing...[/yellow]")
-                ok = self._ps.remove(name, mgr)
+                ok = await asyncio.to_thread(self._ps.remove, name, mgr)
                 result.update(f"[bold]{'✓' if ok else '✗'} Remove {'succeeded' if ok else 'failed'}[/bold]")
             elif action == "update":
                 result.update("[yellow]Updating...[/yellow]")
-                ok = self._ps.update(name, mgr)
+                ok = await asyncio.to_thread(self._ps.update, name, mgr)
                 result.update(f"[bold]{'✓' if ok else '✗'} Update {'succeeded' if ok else 'failed'}[/bold]")
         except Exception as e:
             result.update(f"[bold red]Error: {e}[/bold red]")
 
-    def action_quick_install(self):
-        self._do_action("install")
+    async def action_quick_install(self):
+        await self._do_action("install")
 
-    def action_quick_remove(self):
-        self._do_action("remove")
+    async def action_quick_remove(self):
+        await self._do_action("remove")
 
-    def action_quick_update(self):
-        self._do_action("update")
+    async def action_quick_update(self):
+        await self._do_action("update")
 
     def _refresh_filter_style(self):
         for mgr in PackageManager:

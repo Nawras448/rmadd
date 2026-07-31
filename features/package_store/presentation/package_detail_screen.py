@@ -1,3 +1,5 @@
+import asyncio
+
 from textual.screen import Screen
 from textual.widgets import Header, Footer, Static, Button
 from textual.containers import Horizontal, Vertical
@@ -36,20 +38,23 @@ class PackageDetailScreen(Screen):
         )
         self.query_one("#package-info", Static).update(info)
 
-    def on_button_pressed(self, event: Button.Pressed):
+    async def on_button_pressed(self, event: Button.Pressed):
         result = self.query_one("#action-result", Static)
         name = self._pkg.name
         mgr = self._pkg.manager
 
         try:
             if event.button.id == "btn-install":
-                ok = self._ps.install(name, mgr)
+                result.update("[yellow]Installing...[/yellow]")
+                ok = await asyncio.to_thread(self._ps.install, name, mgr)
                 result.update(f"[bold]{'✓' if ok else '✗'} Install {'succeeded' if ok else 'failed'}[/bold]")
             elif event.button.id == "btn-remove":
-                ok = self._ps.remove(name, mgr)
+                result.update("[yellow]Removing...[/yellow]")
+                ok = await asyncio.to_thread(self._ps.remove, name, mgr)
                 result.update(f"[bold]{'✓' if ok else '✗'} Remove {'succeeded' if ok else 'failed'}[/bold]")
             elif event.button.id == "btn-update":
-                ok = self._ps.update(name, mgr)
+                result.update("[yellow]Updating...[/yellow]")
+                ok = await asyncio.to_thread(self._ps.update, name, mgr)
                 result.update(f"[bold]{'✓' if ok else '✗'} Update {'succeeded' if ok else 'failed'}[/bold]")
         except Exception as e:
             result.update(f"[bold red]Error: {e}[/bold red]")

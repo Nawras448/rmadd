@@ -1,3 +1,5 @@
+import asyncio
+
 from textual.screen import Screen
 from textual.widgets import Header, Footer, Static, Button
 from textual.containers import Horizontal, Vertical
@@ -31,10 +33,18 @@ class DashboardScreen(Screen):
                 yield PackageTable(id="package-table")
         yield Footer()
 
-    def on_mount(self):
-        info = self._ss.get_system_info()
+    async def on_mount(self):
+        self.query_one("#system-card", SystemCard).update("[yellow]Loading system info...[/yellow]")
+        self.query_one("#package-table", PackageTable).show_counts({})
+        asyncio.create_task(self._load_system_info())
+        asyncio.create_task(self._load_package_counts())
+
+    async def _load_system_info(self):
+        info = await asyncio.to_thread(self._ss.get_system_info)
         self.query_one("#system-card", SystemCard).display_info(info)
-        counts = self._ps.get_all_counts()
+
+    async def _load_package_counts(self):
+        counts = await asyncio.to_thread(self._ps.get_all_counts)
         self.query_one("#package-table", PackageTable).show_counts(counts)
 
     def on_button_pressed(self, event: Button.Pressed):
