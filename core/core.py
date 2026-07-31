@@ -1,6 +1,6 @@
 import shutil
 import subprocess
-import platform
+
 
 class SystemInfo:
 
