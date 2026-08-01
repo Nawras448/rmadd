@@ -43,12 +43,14 @@ class FullSystemScreen(Screen):
             self.query_one(f"#{section_id}", Static).border_title = title
         for section_id in ("fs-system", "fs-cpu", "fs-memory", "fs-disks", "fs-gpu", "fs-network"):
             self.query_one(f"#{section_id}", Static).update("[yellow]Loading...[/yellow]")
-        asyncio.create_task(self._load_system())
-        asyncio.create_task(self._load_cpu())
-        asyncio.create_task(self._load_memory())
-        asyncio.create_task(self._load_disks())
-        asyncio.create_task(self._load_gpu())
-        asyncio.create_task(self._load_network())
+        self._tasks: list[asyncio.Task] = []
+        for loader in (self._load_system, self._load_cpu, self._load_memory, self._load_disks, self._load_gpu, self._load_network):
+            self._tasks.append(asyncio.create_task(loader()))
+
+    def on_unmount(self):
+        for task in getattr(self, "_tasks", []):
+            if not task.done():
+                task.cancel()
 
     async def _load_system(self):
         try:

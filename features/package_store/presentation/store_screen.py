@@ -2,7 +2,7 @@ import asyncio
 
 from textual.screen import Screen
 from textual.widgets import Header, Footer, Static, Input, DataTable, Button, TabbedContent, TabPane
-from textual.containers import Horizontal
+from textual.containers import Horizontal, VerticalScroll
 from textual.coordinate import Coordinate
 
 from features.package_store.presentation.package_detail_screen import PackageDetailScreen
@@ -48,9 +48,10 @@ class StoreScreen(Screen):
                 yield ToolsTable(id="tools-table")
                 with Horizontal(id="tools-action-bar"):
                     yield Static(id="tools-sel", classes="sel-label")
-                    yield Button("Install", id="btn-tools-install", variant="primary")
-                    yield Button("Update", id="btn-tools-update", variant="default")
-                yield Static(id="tools-result")
+                    yield Button("Install / تثبيت", id="btn-tools-install", variant="primary")
+                    yield Button("Update / تحديث", id="btn-tools-update", variant="default")
+                with VerticalScroll(id="tools-result-scroll", classes="result-scroll"):
+                    yield Static(id="tools-result")
 
             with TabPane("البحث عن برنامج", id="pane-search") as pane_search:
                 pane_search.border_title = "Search"
@@ -60,9 +61,10 @@ class StoreScreen(Screen):
                 yield PackageTable(id="search-table")
                 with Horizontal(id="search-action-bar"):
                     yield Static(id="search-sel", classes="sel-label")
-                    yield Button("Install", id="btn-search-install", variant="primary")
-                    yield Button("Details", id="btn-search-details", variant="default")
-                yield Static(id="search-result")
+                    yield Button("Install / تثبيت", id="btn-search-install", variant="primary")
+                    yield Button("Details / تفاصيل", id="btn-search-details", variant="default")
+                with VerticalScroll(id="search-result-scroll", classes="result-scroll"):
+                    yield Static(id="search-result")
 
             with TabPane("البرامج المثبتة", id="pane-installed") as pane_installed:
                 pane_installed.border_title = "Installed"
@@ -72,10 +74,11 @@ class StoreScreen(Screen):
                 yield PackageTable(id="installed-table")
                 with Horizontal(id="installed-action-bar"):
                     yield Static(id="installed-sel", classes="sel-label")
-                    yield Button("Remove", id="btn-installed-remove", variant="error")
-                    yield Button("Update", id="btn-installed-update", variant="default")
-                    yield Button("Details", id="btn-installed-details", variant="default")
-                yield Static(id="installed-result")
+                    yield Button("Remove / حذف", id="btn-installed-remove", variant="error")
+                    yield Button("Update / تحديث", id="btn-installed-update", variant="default")
+                    yield Button("Details / تفاصيل", id="btn-installed-details", variant="default")
+                with VerticalScroll(id="installed-result-scroll", classes="result-scroll"):
+                    yield Static(id="installed-result")
         yield Footer()
 
     # ---------- helpers ----------
@@ -118,6 +121,10 @@ class StoreScreen(Screen):
         self._update_search_actions()
         self._update_installed_actions()
         asyncio.create_task(self._do_load_installed())
+
+    def on_unmount(self):
+        if self._debounce_task and not self._debounce_task.done():
+            self._debounce_task.cancel()
 
     async def _do_load_installed(self):
         result = self._result("installed")
@@ -286,6 +293,13 @@ class StoreScreen(Screen):
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated):
         section = event.pane.id.removeprefix("pane-")
         self._active_section = section
+        from textual.widgets._tabs import Tabs, Underline
+        tabs_widget = self.query_one(TabbedContent).query_one(Tabs)
+        underline = tabs_widget.query_one(Underline)
+        underline.show_highlight = True
+        span = event.tab.virtual_region.shrink(event.tab.styles.gutter).column_span
+        underline.highlight_start = span[0]
+        underline.highlight_end = span[1]
         if section == "tools":
             self.query_one("#tools-table")._table.focus()
         elif section == "search":
@@ -336,6 +350,9 @@ class StoreScreen(Screen):
         if pkg:
             self.app.push_screen(PackageDetailScreen(pkg, self._ps))
 
+    def _auto_scroll_result(self, section: str):
+        self.query_one(f"#{section}-result-scroll").scroll_end(animate=False)
+
     async def _do_pkg_action(self, action: str, section: str):
         name, mgr_str = self._get_cursor_row(section)
         result = self._result(section)
@@ -351,9 +368,11 @@ class StoreScreen(Screen):
         emoji, title = labels[action]
         try:
             result.update(f"[yellow]{emoji} {title} {name}...[/yellow]")
+            self._auto_scroll_result(section)
             ok = await asyncio.to_thread(getattr(self._ps, action), name, mgr)
             icon = "✓" if ok else "✗"
             result.update(f"[bold]{icon} {title} {'succeeded' if ok else 'failed'} ({name})[/bold]")
+            self._auto_scroll_result(section)
             if ok:
                 if action == "install":
                     self._mark_installed(name, mgr)
@@ -361,6 +380,7 @@ class StoreScreen(Screen):
                     self._mark_removed(name, mgr)
         except Exception as e:
             result.update(f"[bold red]Error: {e}[/bold red]")
+            self._auto_scroll_result(section)
 
     async def _do_tool_action(self, action: str):
         name, mgr_str = self._get_cursor_row("tools")
@@ -373,15 +393,18 @@ class StoreScreen(Screen):
         emoji, title = labels[action]
         try:
             result.update(f"[yellow]{emoji} {title} {name}...[/yellow]")
+            self._auto_scroll_result("tools")
             ok = await asyncio.to_thread(getattr(self._ps, action), name, mgr)
             icon = "✓" if ok else "✗"
             result.update(f"[bold]{icon} {title} {'succeeded' if ok else 'failed'} ({name})[/bold]")
+            self._auto_scroll_result("tools")
             if ok:
                 self._tools = detect_tools()
                 self.query_one("#tools-table", ToolsTable).show_tools(self._tools)
                 self._update_tools_actions()
         except Exception as e:
             result.update(f"[bold red]Error: {e}[/bold red]")
+            self._auto_scroll_result("tools")
 
     def _mark_installed(self, name, mgr):
         if (name, mgr) not in self._installed_set:
