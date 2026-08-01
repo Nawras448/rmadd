@@ -1,14 +1,25 @@
 from typing import Iterable, Optional, Set
 
-from textual.containers import Horizontal
+from textual.containers import Horizontal, VerticalScroll
 from textual.message import Message
-from textual.widgets import Checkbox
+from textual.widgets import Checkbox, Static
 
-from features.package_store.domain import PackageManager
+from features.package_store.domain import (
+    PackageManager,
+    PackageManagerTier,
+    TIER_LABELS,
+    tier,
+)
+
+TIER_GROUP_ORDER = (
+    PackageManagerTier.NATIVE,
+    PackageManagerTier.UNIVERSAL,
+    PackageManagerTier.ECOSYSTEM,
+)
 
 
-class ManagerFilter(Horizontal):
-    """Multi-select filter over package managers.
+class ManagerFilter(VerticalScroll):
+    """Multi-select filter over package managers, grouped by tier.
 
     An "All" checkbox is checked by default and disables the per-manager
     checkboxes. Unchecking it enables the per-manager boxes (all initially
@@ -31,8 +42,14 @@ class ManagerFilter(Horizontal):
 
     def compose(self):
         yield Checkbox("All", value=True, id="all")
-        for mgr in self._managers:
-            yield Checkbox(mgr.value, value=False, disabled=True, id=f"mgr-{mgr.value}")
+        for mgr_tier in TIER_GROUP_ORDER:
+            group = [mgr for mgr in self._managers if tier(mgr) == mgr_tier]
+            if not group:
+                continue
+            yield Static(f"[bold]{TIER_LABELS[mgr_tier]}[/bold]", classes="tier-label")
+            with Horizontal(classes="tier-row"):
+                for mgr in group:
+                    yield Checkbox(mgr.value, value=False, disabled=True, id=f"mgr-{mgr.value}")
 
     def on_mount(self):
         self._boxes = {mgr: self.query_one(f"#mgr-{mgr.value}", Checkbox) for mgr in self._managers}

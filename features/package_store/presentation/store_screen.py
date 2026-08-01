@@ -7,7 +7,8 @@ from textual.coordinate import Coordinate
 
 from features.package_store.presentation.package_detail_screen import PackageDetailScreen
 from features.package_store.presentation.install_progress_screen import InstallProgressScreen
-from features.package_store.presentation.package_table import PackageTable
+from features.package_store.presentation.appimage_install_screen import AppImageInstallScreen
+from features.package_store.presentation.package_table import PackageTable, apply_pane_floor
 from features.package_store.presentation.tools_table import ToolsTable
 from features.package_store.presentation.manager_filter import ManagerFilter
 from features.package_store.installer_tools import detect_tools
@@ -46,40 +47,44 @@ class StoreScreen(Screen):
         with TabbedContent(initial="pane-search", id="store-tabs"):
             with TabPane("Download Tools", id="pane-tools") as pane_tools:
                 pane_tools.border_title = "Tools"
-                yield ToolsTable(id="tools-table")
-                with Horizontal(id="tools-action-bar"):
-                    yield Static(id="tools-sel", classes="sel-label")
-                    yield Button("Install", id="btn-tools-install", variant="primary")
-                    yield Button("Update", id="btn-tools-update", variant="default")
-                with VerticalScroll(id="tools-result-scroll", classes="result-scroll"):
-                    yield Static(id="tools-result")
+                with VerticalScroll(id="pane-scroll-tools"):
+                    yield ToolsTable(id="tools-table")
+                    with Horizontal(id="tools-action-bar"):
+                        yield Static(id="tools-sel", classes="sel-label")
+                        yield Button("Install", id="btn-tools-install", variant="primary")
+                        yield Button("Update", id="btn-tools-update", variant="default")
+                        yield Button("Install AppImage...", id="btn-tools-appimage", variant="default")
+                    with VerticalScroll(id="tools-result-scroll", classes="result-scroll"):
+                        yield Static(id="tools-result")
 
             with TabPane("Search Programs", id="pane-search") as pane_search:
                 pane_search.border_title = "Search"
-                with Horizontal(id="search-top"):
-                    yield Input(placeholder="Search programs (as you type)...", id="search-input")
-                yield ManagerFilter(self._ps.available_managers, id="search-managers")
-                yield PackageTable(id="search-table")
-                with Horizontal(id="search-action-bar"):
-                    yield Static(id="search-sel", classes="sel-label")
-                    yield Button("Install", id="btn-search-install", variant="primary")
-                    yield Button("Details", id="btn-search-details", variant="default")
-                with VerticalScroll(id="search-result-scroll", classes="result-scroll"):
-                    yield Static(id="search-result")
+                with VerticalScroll(id="pane-scroll-search"):
+                    with Horizontal(id="search-top"):
+                        yield Input(placeholder="Search programs (as you type)...", id="search-input")
+                    yield ManagerFilter(self._ps.available_managers, id="search-managers")
+                    yield PackageTable(id="search-table")
+                    with Horizontal(id="search-action-bar"):
+                        yield Static(id="search-sel", classes="sel-label")
+                        yield Button("Install", id="btn-search-install", variant="primary")
+                        yield Button("Details", id="btn-search-details", variant="default")
+                    with VerticalScroll(id="search-result-scroll", classes="result-scroll"):
+                        yield Static(id="search-result")
 
             with TabPane("Installed Apps", id="pane-installed") as pane_installed:
                 pane_installed.border_title = "Installed"
-                with Horizontal(id="installed-top"):
-                    yield Input(placeholder="Search installed programs...", id="installed-input")
-                yield ManagerFilter(self._ps.available_managers, id="installed-managers")
-                yield PackageTable(id="installed-table")
-                with Horizontal(id="installed-action-bar"):
-                    yield Static(id="installed-sel", classes="sel-label")
-                    yield Button("Remove", id="btn-installed-remove", variant="error")
-                    yield Button("Update", id="btn-installed-update", variant="default")
-                    yield Button("Details", id="btn-installed-details", variant="default")
-                with VerticalScroll(id="installed-result-scroll", classes="result-scroll"):
-                    yield Static(id="installed-result")
+                with VerticalScroll(id="pane-scroll-installed"):
+                    with Horizontal(id="installed-top"):
+                        yield Input(placeholder="Search installed programs...", id="installed-input")
+                    yield ManagerFilter(self._ps.available_managers, id="installed-managers")
+                    yield PackageTable(id="installed-table")
+                    with Horizontal(id="installed-action-bar"):
+                        yield Static(id="installed-sel", classes="sel-label")
+                        yield Button("Remove", id="btn-installed-remove", variant="error")
+                        yield Button("Update", id="btn-installed-update", variant="default")
+                        yield Button("Details", id="btn-installed-details", variant="default")
+                    with VerticalScroll(id="installed-result-scroll", classes="result-scroll"):
+                        yield Static(id="installed-result")
         yield Footer()
 
     # ---------- helpers ----------
@@ -127,6 +132,13 @@ class StoreScreen(Screen):
         if self._debounce_task and not self._debounce_task.done():
             self._debounce_task.cancel()
 
+    def on_resize(self, event):
+        for section in ("tools", "search", "installed"):
+            try:
+                apply_pane_floor(self._table_for(section))
+            except Exception:
+                pass
+
     async def _do_load_installed(self):
         result = self._result("installed")
         table = self.query_one("#installed-table", PackageTable)
@@ -171,7 +183,10 @@ class StoreScreen(Screen):
             return
         self._search_gen += 1
         gen = self._search_gen
-        manager_list = list(self._ps.available_managers) if managers is None else list(managers)
+        if managers is None:
+            manager_list = list(self._ps.default_search_managers())
+        else:
+            manager_list = list(managers)
         merged: list[Package] = []
         done = 0
         result.update(f"[cyan]Searching... 0/{len(manager_list)}[/cyan]")
@@ -280,6 +295,8 @@ class StoreScreen(Screen):
             asyncio.create_task(self._do_tool_action("install"))
         elif bid == "btn-tools-update":
             asyncio.create_task(self._do_tool_action("update"))
+        elif bid == "btn-tools-appimage":
+            self._open_appimage_install()
         elif bid == "btn-search-install":
             asyncio.create_task(self._do_pkg_action("install", "search"))
         elif bid == "btn-search-details":
@@ -342,6 +359,23 @@ class StoreScreen(Screen):
 
     def _open_detail(self, section: str):
         asyncio.create_task(self._do_open_detail(section))
+
+    def _open_appimage_install(self):
+        self.app.push_screen(
+            AppImageInstallScreen(
+                self._ps,
+                on_finish=self._on_appimage_installed,
+            )
+        )
+
+    def _on_appimage_installed(self, ok: bool, name: str):
+        result = self._result("tools")
+        if ok:
+            result.update(f"[bold green]✓ AppImage installed: {name}[/bold green]")
+            asyncio.create_task(self._do_load_installed())
+        else:
+            result.update(f"[bold red]✗ AppImage install failed: {name}[/bold red]")
+        self._auto_scroll_result("tools")
 
     async def _do_open_detail(self, section: str):
         name, mgr_str = self._get_cursor_row(section)
@@ -427,6 +461,7 @@ class StoreScreen(Screen):
             label.update(f"[bold]{name}[/bold] ({mgr_str})")
         else:
             bar.display = False
+        apply_pane_floor(self._table_for("search"))
 
     def _update_installed_actions(self):
         name, mgr_str = self._get_cursor_row("installed")
@@ -437,6 +472,7 @@ class StoreScreen(Screen):
             label.update(f"[bold]{name}[/bold] ({mgr_str})")
         else:
             bar.display = False
+        apply_pane_floor(self._table_for("installed"))
 
     def _update_tools_actions(self):
         name, mgr_str = self._get_cursor_row("tools")
@@ -444,9 +480,11 @@ class StoreScreen(Screen):
         label = self.query_one("#tools-sel", Static)
         if not name:
             bar.display = False
+            apply_pane_floor(self._table_for("tools"))
             return
         bar.display = True
         label.update(f"[bold]{name}[/bold]")
         installed_names = {t.name for t, st in self._tools if st}
         self.query_one("#btn-tools-install", Button).disabled = name in installed_names
         self.query_one("#btn-tools-update", Button).disabled = name not in installed_names
+        apply_pane_floor(self._table_for("tools"))

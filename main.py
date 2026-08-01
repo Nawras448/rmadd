@@ -1,8 +1,7 @@
 import sys
 import os
 
-from features.package_store.domain import PackageManager
-from features.package_store.adapters import DnfAdapter, AptAdapter, FlatpakAdapter, SnapAdapter, PacmanAdapter
+from features.package_store.registry import discover_managers
 from features.system_info.adapters import HostnamectlAdapter
 from features.system_monitor.adapters import ProcFsAdapter
 from shared.cache import CachingSystemAdapter, CachingHardwareAdapter
@@ -20,11 +19,8 @@ def build_container() -> DIContainer:
     hardware_source = CachingHardwareAdapter(ProcFsAdapter(), ttl_seconds=3)
     container.set_hardware_source(hardware_source)
 
-    container.add_package_source(PackageManager.DNF, DnfAdapter())
-    container.add_package_source(PackageManager.APT, AptAdapter())
-    container.add_package_source(PackageManager.FLATPAK, FlatpakAdapter())
-    container.add_package_source(PackageManager.SNAP, SnapAdapter())
-    container.add_package_source(PackageManager.PACMAN, PacmanAdapter())
+    for manager, adapter in discover_managers():
+        container.add_package_source(manager, adapter)
 
     return container
 

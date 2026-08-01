@@ -1,6 +1,8 @@
 from textual.widgets import DataTable
 from textual.containers import Vertical
 
+from features.package_store.presentation.package_table import apply_pane_floor
+
 
 class ToolsTable(Vertical):
     can_focus = False
@@ -26,6 +28,7 @@ class ToolsTable(Vertical):
 
     def on_resize(self, event):
         self._fit_columns(event.size.width)
+        apply_pane_floor(self)
 
     def _tool_widths(self, width):
         available = max(20, width - 9)

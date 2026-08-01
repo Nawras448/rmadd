@@ -1,42 +1,31 @@
 import shutil
 import subprocess
 
+from features.package_store.registry import discover_managers
+
 
 class SystemInfo:
 
-    # Mapping of package managers to commands that count their packages
-    PACKAGE_MANAGERS = {
-        "apt": "dpkg-query -f '${binary:Package}\n' -W | wc -l",
-        "snap": "snap list | tail -n +2 | wc -l",
-        "flatpak": "flatpak list --app | wc -l",
-        "pacman": "pacman -Qq | wc -l",
-        "dnf": "rpm -qa | wc -l",
-    }
-
     def get_package_count(self, manager_name: str) -> str:
-        """Check that the package manager exists and run its count command"""
-        if not shutil.which(manager_name):
-            return "N/A"
-
-        try:
-            cmd = self.PACKAGE_MANAGERS.get(manager_name)
-            if not cmd:
-                return "N/A"
-
-            result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, check=True
-            )
-            return result.stdout.strip()
-        except Exception:
-            return "0"
+        """Count packages via the shared adapter for the given manager."""
+        for mgr, adapter in discover_managers():
+            if mgr.value == manager_name:
+                try:
+                    return str(adapter.count())
+                except Exception:
+                    return "0"
+        return "N/A"
 
     def get_all_counts(self) -> dict:
-        """Fetch the package counts of all available managers"""
+        """Fetch the package counts of all available managers (tier ordered)"""
         counts = {}
-        for pm in self.PACKAGE_MANAGERS:
-            count = self.get_package_count(pm)
-            if count != "N/A":
-                counts[pm] = count
+        for mgr, adapter in discover_managers():
+            try:
+                count = adapter.count()
+            except Exception:
+                continue
+            if count and count > 0:
+                counts[mgr.value] = str(count)
         return counts
 
     def get_system_info(self) -> dict:

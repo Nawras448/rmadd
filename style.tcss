@@ -144,6 +144,10 @@ TabbedContent {
     height: 1fr;
 }
 
+TabPane {
+    height: 100%;
+}
+
 TabbedContent > ContentTabs {
     dock: top;
     height: 3;
@@ -240,9 +244,16 @@ DataTable:ansi > .datatable--header {
     margin: 0;
 }
 
-#search-table, #installed-table {
+#search-table, #installed-table, #tools-table {
     height: 1fr;
     margin: 0 0 0 0;
+}
+
+#pane-scroll-tools, #pane-scroll-search, #pane-scroll-installed {
+    height: 1fr;
+    width: 100%;
+    scrollbar-color: $primary;
+    scrollbar-background: $surface;
 }
 
 #package-table {
@@ -302,12 +313,15 @@ Input:ansi:focus {
 /* ---------------- checkboxes ---------------- */
 
 #search-managers, #installed-managers {
-    height: 3;
-    align: left middle;
+    height: auto;
+    max-height: 7;
     margin: 0;
 }
 
 #search-managers Checkbox, #installed-managers Checkbox {
+    height: 1;
+    border: none;
+    padding: 0 1;
     margin: 0 1 0 0;
     background: transparent;
     color: $foreground;
@@ -341,6 +355,17 @@ ToggleButton:ansi.-on > .toggle--button {
     text-style: bold;
     margin-right: 3;
     color: $secondary;
+}
+
+.tier-label {
+    text-style: bold;
+    color: $secondary;
+    margin: 0;
+}
+
+.tier-row {
+    height: auto;
+    align: left middle;
 }
 
 /* ---------------- buttons ---------------- */
@@ -469,7 +494,8 @@ Button:ansi.-style-flat.-warning, Button:ansi.-style-default.-warning {
     margin: 0 1;
 }
 
-#tools-action-bar, #search-action-bar, #installed-action-bar, #action-bar {
+#tools-action-bar, #search-action-bar, #installed-action-bar {
+    dock: bottom;
     height: 5;
     align: center middle;
     border: round $primary;
@@ -479,7 +505,12 @@ Button:ansi.-style-flat.-warning, Button:ansi.-style-default.-warning {
 }
 
 #action-bar {
+    height: 5;
+    align: center middle;
+    border: round $primary;
+    padding: 0 1;
     margin: 1 0;
+    background: $surface;
 }
 
 #tools-result, #search-result, #installed-result, #action-result, #action-result-store {
@@ -684,3 +715,47 @@ ProgressBar > .bar--indeterminate {
     scrollbar-color: $primary;
     scrollbar-background: $surface;
 }
+
+/* ---------------- appimage install panel ---------------- */
+
+#appimage-panel {
+    width: 1fr;
+    height: 1fr;
+    border: round $primary;
+    background: $surface;
+    padding: 1 2;
+    margin: 1 2;
+}
+
+#appimage-title {
+    height: 3;
+}
+
+#appimage-hint {
+    height: 3;
+    color: $foreground-muted;
+    margin: 0 0 1 0;
+}
+
+#appimage-tree {
+    height: 1fr;
+    border: tall $border-blurred;
+    background: $background;
+    padding: 0 1;
+}
+
+#appimage-status {
+    height: 2;
+    margin: 1 0 0 0;
+}
+
+#appimage-buttons {
+    height: 3;
+    align: right middle;
+    margin: 0;
+}
+
+#appimage-buttons Button {
+    margin: 0 0 0 1;
+}
+

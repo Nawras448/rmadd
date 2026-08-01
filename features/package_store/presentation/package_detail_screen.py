@@ -5,7 +5,7 @@ from textual.widgets import Header, Footer, Static, Button
 from textual.containers import Horizontal, Vertical
 from textual.binding import Binding
 
-from features.package_store.domain import Package
+from features.package_store.domain import Package, PackageStatus
 from features.package_store.presentation.install_progress_screen import InstallProgressScreen
 
 
@@ -31,8 +31,13 @@ class PackageDetailScreen(Screen):
             yield Static(id="action-result")
         yield Footer()
 
-    def on_mount(self):
+    async def on_mount(self):
         p = self._pkg
+        status = await asyncio.to_thread(self._ps.get_status, p.name, p.manager)
+        status_label = {
+            PackageStatus.INSTALLED: "Installed",
+            PackageStatus.AVAILABLE: "Available",
+        }.get(status, "Unknown")
         info = (
             f"[bold]Package Details[/bold]\n\n"
             f"Name: {p.name}\n"
@@ -41,6 +46,7 @@ class PackageDetailScreen(Screen):
             f"Repository: {p.repo or 'N/A'}\n"
             f"Size: {p.size or 'N/A'}\n"
             f"Manager: {p.manager.value}\n"
+            f"Status: {status_label}\n"
             f"Summary: {p.summary or 'N/A'}\n"
         )
         self.query_one("#package-info", Static).update(info)
