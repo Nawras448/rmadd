@@ -5,6 +5,8 @@ from textual.widgets import Header, Footer, Static
 from textual.containers import Vertical, Horizontal
 from textual.binding import Binding
 
+from features.ui_switch.presentation.tui.navigation import NavigationSidebar
+
 
 class FullSystemScreen(Screen):
     BINDINGS = [
@@ -18,13 +20,15 @@ class FullSystemScreen(Screen):
 
     def compose(self):
         yield Header(show_clock=True)
-        with Vertical(id="full-system-content"):
-            yield Static(id="fs-system", classes="fs-section")
-            yield Static(id="fs-cpu", classes="fs-section")
-            yield Static(id="fs-memory", classes="fs-section")
-            yield Static(id="fs-disks", classes="fs-section")
-            yield Static(id="fs-gpu", classes="fs-section")
-            yield Static(id="fs-network", classes="fs-section")
+        with Horizontal():
+            yield NavigationSidebar(id="sidebar")
+            with Vertical(id="full-system-content"):
+                yield Static(id="fs-system", classes="fs-section")
+                yield Static(id="fs-cpu", classes="fs-section")
+                yield Static(id="fs-memory", classes="fs-section")
+                yield Static(id="fs-disks", classes="fs-section")
+                yield Static(id="fs-gpu", classes="fs-section")
+                yield Static(id="fs-network", classes="fs-section")
         yield Footer()
 
     async def on_mount(self):

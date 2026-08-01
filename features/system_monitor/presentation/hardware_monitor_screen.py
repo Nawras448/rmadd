@@ -4,6 +4,7 @@ from textual.screen import Screen
 from textual.widgets import Header, Footer, Static
 from textual.containers import Horizontal, Vertical
 
+from features.ui_switch.presentation.tui.navigation import NavigationSidebar
 from features.system_monitor.presentation.cpu_graph import CpuGraph
 from features.system_monitor.domain import HardwareReport
 
@@ -21,6 +22,7 @@ class HardwareMonitorScreen(Screen):
     def compose(self):
         yield Header(show_clock=True)
         with Horizontal():
+            yield NavigationSidebar(id="sidebar")
             with Vertical(id="left-panel"):
                 yield CpuGraph(id="cpu-graph")
                 yield Static(id="memory-info", classes="monitor-card")

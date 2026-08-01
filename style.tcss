@@ -54,6 +54,8 @@ FooterKey:hover > .footer-key--key {
 
 #sidebar {
     width: 20%;
+    min-width: 26;
+    max-width: 32;
     height: 100%;
     background: $surface;
     border: round $primary;
@@ -101,7 +103,7 @@ FooterKey:hover > .footer-key--key {
 }
 
 #content {
-    width: 80%;
+    width: 1fr;
     height: 100%;
     padding: 1;
     scrollbar-color: $primary;
@@ -117,12 +119,12 @@ FooterKey:hover > .footer-key--key {
 }
 
 #left-panel, #right-panel {
-    width: 50%;
+    width: 1fr;
     height: 100%;
 }
 
 #full-system-content {
-    width: 100%;
+    width: 1fr;
     height: 100%;
     padding: 1;
     overflow-y: auto;
@@ -136,6 +138,10 @@ FooterKey:hover > .footer-key--key {
     height: 1fr;
     width: 100%;
     padding: 0 1;
+}
+
+TabbedContent {
+    height: 1fr;
 }
 
 TabbedContent > ContentTabs {
@@ -442,6 +448,19 @@ Button:ansi.-style-flat.-warning, Button:ansi.-style-default.-warning {
 }
 
 /* ---------------- action bars & result strips ---------------- */
+
+#store-topbar {
+    dock: top;
+    height: 3;
+    align: center middle;
+    border-bottom: dashed $primary;
+    padding: 0 1;
+    background: $background;
+}
+
+#store-topbar Button {
+    margin: 0 1;
+}
 
 #tools-action-bar, #search-action-bar, #installed-action-bar, #action-bar {
     height: 3;

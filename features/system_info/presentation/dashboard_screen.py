@@ -1,14 +1,12 @@
 import asyncio
 
 from textual.screen import Screen
-from textual.widgets import Header, Footer, Static, Button
+from textual.widgets import Header, Footer, Static
 from textual.containers import Horizontal, Vertical
 
+from features.ui_switch.presentation.tui.navigation import NavigationSidebar
 from features.system_info.presentation.system_card import SystemCard
-from features.system_info.presentation.full_system_screen import FullSystemScreen
 from features.package_store.presentation.package_table import PackageTable
-from features.system_monitor.presentation.hardware_monitor_screen import HardwareMonitorScreen
-from features.package_store.presentation.store_screen import StoreScreen
 
 
 class DashboardScreen(Screen):
@@ -21,14 +19,7 @@ class DashboardScreen(Screen):
     def compose(self):
         yield Header(show_clock=True)
         with Horizontal():
-            with Vertical(id="sidebar") as sidebar:
-                sidebar.border_title = "Navigation"
-                yield Static("[bold]Navigation[/bold]", id="sidebar-title")
-                yield Button("Dashboard", id="btn_dashboard", variant="primary")
-                yield Button("Full System", id="btn_full_system")
-                yield Button("App Store", id="btn_store")
-                yield Button("Hardware Monitor", id="btn_hardware")
-                yield Button("Quit", id="btn_quit", variant="error")
+            yield NavigationSidebar(id="sidebar")
             with Vertical(id="content"):
                 yield SystemCard(id="system-card")
                 yield PackageTable(id="package-table")
@@ -53,13 +44,3 @@ class DashboardScreen(Screen):
             self.query_one("#package-table", PackageTable).show_counts(counts)
         except Exception as e:
             self.query_one("#package-table", PackageTable).show_counts({"error": str(e)})
-
-    def on_button_pressed(self, event: Button.Pressed):
-        if event.button.id == "btn_full_system":
-            self.app.push_screen(FullSystemScreen(self._ss, self._hw))
-        elif event.button.id == "btn_store":
-            self.app.push_screen(StoreScreen(self._ps))
-        elif event.button.id == "btn_hardware":
-            self.app.push_screen(HardwareMonitorScreen(self._hw))
-        elif event.button.id == "btn_quit":
-            self.app.exit()

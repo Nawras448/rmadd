@@ -40,6 +40,8 @@ class StoreScreen(Screen):
 
     def compose(self):
         yield Header(show_clock=True)
+        with Horizontal(id="store-topbar"):
+            yield Button("Back to Dashboard", id="btn-store-back")
         with TabbedContent(initial="pane-search", id="store-tabs"):
             with TabPane("أدوات التحميل", id="pane-tools") as pane_tools:
                 pane_tools.border_title = "Tools"
@@ -264,7 +266,9 @@ class StoreScreen(Screen):
 
     def on_button_pressed(self, event: Button.Pressed):
         bid = event.button.id
-        if bid == "btn-tools-install":
+        if bid == "btn-store-back":
+            self.dismiss()
+        elif bid == "btn-tools-install":
             asyncio.create_task(self._do_tool_action("install"))
         elif bid == "btn-tools-update":
             asyncio.create_task(self._do_tool_action("update"))
