@@ -6,6 +6,7 @@ from textual.containers import Horizontal, Vertical
 from textual.binding import Binding
 
 from features.package_store.domain import Package
+from features.package_store.presentation.install_progress_screen import InstallProgressScreen
 
 
 class PackageDetailScreen(Screen):
@@ -58,20 +59,22 @@ class PackageDetailScreen(Screen):
         await self._run_action("install")
 
     async def _run_action(self, action: str):
+        self.app.push_screen(
+            InstallProgressScreen(
+                self._ps,
+                action,
+                self._pkg.name,
+                self._pkg.manager,
+                on_finish=self._on_operation_finished,
+            )
+        )
+
+    def _on_operation_finished(self, action: str, section: str, name, mgr, ok: bool, cancelled: bool):
         result = self.query_one("#action-result", Static)
-        name = self._pkg.name
-        mgr = self._pkg.manager
-        labels = {
-            "install": ("📥 Installing", "Install"),
-            "remove": ("🗑 Removing", "Remove"),
-            "update": ("🔄 Updating", "Update"),
-        }
-        emoji, title = labels[action]
-        try:
-            result.update(f"[yellow]{emoji} {title} {name}...[/yellow]")
-            method = getattr(self._ps, action)
-            ok = await asyncio.to_thread(method, name, mgr)
-            icon = "✓" if ok else "✗"
-            result.update(f"[bold]{icon} {title} {'succeeded' if ok else 'failed'} ({name})[/bold]")
-        except Exception as e:
-            result.update(f"[bold red]Error: {e}[/bold red]")
+        label = action.title()
+        if cancelled:
+            result.update(f"[bold red]✗ {label} cancelled ({name})[/bold red]")
+        elif ok:
+            result.update(f"[bold green]✓ {label} succeeded ({name})[/bold green]")
+        else:
+            result.update(f"[bold red]✗ {label} failed ({name})[/bold red]")

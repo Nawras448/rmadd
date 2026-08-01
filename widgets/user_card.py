@@ -3,13 +3,13 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Footer, Header, Label, Static
 from textual.binding import Binding
 
-# استيراد الواجهات الفرعية
+# Import the sub-views
 from widgets.About import About
 from widgets.settings_view import SettingsView
 
 
 class UserCard(Static):
-    # تعيين اسم التطبيق والعنوان الفرعي
+    # Application name and subtitle
     TITLE = "rmadd"
     SUB_TITLE = "v0.1.0-dev | Package & System Monitor"
 
@@ -24,20 +24,20 @@ class UserCard(Static):
         yield Footer()
 
         with Horizontal():
-            # الشريط الجانبي
+            # Sidebar
             with Vertical(id="tartib"):
                 yield Static("option", id="sidebar-title")
                 yield Button("program", id="btn_programs")
                 yield Button("settings", id="btn_settings")
                 yield Button("About", id="btn_About")
 
-            # منطقة عرض المحتوى المتغير
+            # Area for the variable content view
             with Vertical(id="content"):
                 yield Static("Programs View") 
-                 # العرض الافتراضي عند فتح التطبيق
+                 # Default view shown when the app opens
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """مُعالج الأحداث: التنقل بين الصفحات بناءً على الزر المضغوط"""
+        """Event handler: navigate between pages based on the pressed button"""
 
         content_area = self.query_one("#content", Vertical)
 

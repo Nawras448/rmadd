@@ -4,7 +4,7 @@ from textual.containers import Vertical
 
 
 class SettingsView(Static):
-    """عرض مخصص لإعدادات التطبيق والحزم"""
+    """Custom view for application and package settings"""
 
     def compose(self) -> ComposeResult:
         yield Label("Settings & Configuration", id="settings-title")

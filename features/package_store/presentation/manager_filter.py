@@ -10,7 +10,7 @@ from features.package_store.domain import PackageManager
 class ManagerFilter(Horizontal):
     """Multi-select filter over package managers.
 
-    A "الكل" (all) checkbox is checked by default and disables the per-manager
+    An "All" checkbox is checked by default and disables the per-manager
     checkboxes. Unchecking it enables the per-manager boxes (all initially
     checked). Selecting a subset posts Changed(selected) with selected=None
     meaning "all managers".
@@ -30,7 +30,7 @@ class ManagerFilter(Horizontal):
         self._last_selected: Optional[Set[PackageManager]] = None
 
     def compose(self):
-        yield Checkbox("الكل", value=True, id="all")
+        yield Checkbox("All", value=True, id="all")
         for mgr in self._managers:
             yield Checkbox(mgr.value, value=False, disabled=True, id=f"mgr-{mgr.value}")
 

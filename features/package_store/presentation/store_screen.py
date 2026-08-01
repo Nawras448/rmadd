@@ -6,6 +6,7 @@ from textual.containers import Horizontal, VerticalScroll
 from textual.coordinate import Coordinate
 
 from features.package_store.presentation.package_detail_screen import PackageDetailScreen
+from features.package_store.presentation.install_progress_screen import InstallProgressScreen
 from features.package_store.presentation.package_table import PackageTable
 from features.package_store.presentation.tools_table import ToolsTable
 from features.package_store.presentation.manager_filter import ManagerFilter
@@ -43,17 +44,17 @@ class StoreScreen(Screen):
         with Horizontal(id="store-topbar"):
             yield Button("Back to Dashboard", id="btn-store-back")
         with TabbedContent(initial="pane-search", id="store-tabs"):
-            with TabPane("أدوات التحميل", id="pane-tools") as pane_tools:
+            with TabPane("Download Tools", id="pane-tools") as pane_tools:
                 pane_tools.border_title = "Tools"
                 yield ToolsTable(id="tools-table")
                 with Horizontal(id="tools-action-bar"):
                     yield Static(id="tools-sel", classes="sel-label")
-                    yield Button("Install / تثبيت", id="btn-tools-install", variant="primary")
-                    yield Button("Update / تحديث", id="btn-tools-update", variant="default")
+                    yield Button("Install", id="btn-tools-install", variant="primary")
+                    yield Button("Update", id="btn-tools-update", variant="default")
                 with VerticalScroll(id="tools-result-scroll", classes="result-scroll"):
                     yield Static(id="tools-result")
 
-            with TabPane("البحث عن برنامج", id="pane-search") as pane_search:
+            with TabPane("Search Programs", id="pane-search") as pane_search:
                 pane_search.border_title = "Search"
                 with Horizontal(id="search-top"):
                     yield Input(placeholder="Search programs (as you type)...", id="search-input")
@@ -61,12 +62,12 @@ class StoreScreen(Screen):
                 yield PackageTable(id="search-table")
                 with Horizontal(id="search-action-bar"):
                     yield Static(id="search-sel", classes="sel-label")
-                    yield Button("Install / تثبيت", id="btn-search-install", variant="primary")
-                    yield Button("Details / تفاصيل", id="btn-search-details", variant="default")
+                    yield Button("Install", id="btn-search-install", variant="primary")
+                    yield Button("Details", id="btn-search-details", variant="default")
                 with VerticalScroll(id="search-result-scroll", classes="result-scroll"):
                     yield Static(id="search-result")
 
-            with TabPane("البرامج المثبتة", id="pane-installed") as pane_installed:
+            with TabPane("Installed Apps", id="pane-installed") as pane_installed:
                 pane_installed.border_title = "Installed"
                 with Horizontal(id="installed-top"):
                     yield Input(placeholder="Search installed programs...", id="installed-input")
@@ -74,9 +75,9 @@ class StoreScreen(Screen):
                 yield PackageTable(id="installed-table")
                 with Horizontal(id="installed-action-bar"):
                     yield Static(id="installed-sel", classes="sel-label")
-                    yield Button("Remove / حذف", id="btn-installed-remove", variant="error")
-                    yield Button("Update / تحديث", id="btn-installed-update", variant="default")
-                    yield Button("Details / تفاصيل", id="btn-installed-details", variant="default")
+                    yield Button("Remove", id="btn-installed-remove", variant="error")
+                    yield Button("Update", id="btn-installed-update", variant="default")
+                    yield Button("Details", id="btn-installed-details", variant="default")
                 with VerticalScroll(id="installed-result-scroll", classes="result-scroll"):
                     yield Static(id="installed-result")
         yield Footer()
@@ -353,34 +354,44 @@ class StoreScreen(Screen):
     def _auto_scroll_result(self, section: str):
         self.query_one(f"#{section}-result-scroll").scroll_end(animate=False)
 
+    def _start_operation(self, action: str, section: str, name: str, mgr: PackageManager):
+        self.app.push_screen(
+            InstallProgressScreen(
+                self._ps,
+                action,
+                name,
+                mgr,
+                on_finish=self._on_operation_finished,
+                section=section,
+            )
+        )
+
+    def _on_operation_finished(self, action: str, section: str, name: str, mgr: PackageManager, ok: bool, cancelled: bool):
+        result = self._result(section)
+        label = action.title()
+        if cancelled:
+            result.update(f"[bold red]✗ {label} cancelled ({name})[/bold red]")
+        elif ok:
+            result.update(f"[bold green]✓ {label} succeeded ({name})[/bold green]")
+            if action == "install":
+                self._mark_installed(name, mgr)
+            elif action == "remove":
+                self._mark_removed(name, mgr)
+        else:
+            result.update(f"[bold red]✗ {label} failed ({name})[/bold red]")
+        self._auto_scroll_result(section)
+        if section == "tools":
+            self._tools = detect_tools()
+            self.query_one("#tools-table", ToolsTable).show_tools(self._tools)
+            self._update_tools_actions()
+
     async def _do_pkg_action(self, action: str, section: str):
         name, mgr_str = self._get_cursor_row(section)
         result = self._result(section)
         if not name or not mgr_str:
             result.update("[bold red]No package selected — use ↑↓ to select one first[/bold red]")
             return
-        mgr = PackageManager(mgr_str)
-        labels = {
-            "install": ("📥 Installing", "Install"),
-            "remove": ("🗑 Removing", "Remove"),
-            "update": ("🔄 Updating", "Update"),
-        }
-        emoji, title = labels[action]
-        try:
-            result.update(f"[yellow]{emoji} {title} {name}...[/yellow]")
-            self._auto_scroll_result(section)
-            ok = await asyncio.to_thread(getattr(self._ps, action), name, mgr)
-            icon = "✓" if ok else "✗"
-            result.update(f"[bold]{icon} {title} {'succeeded' if ok else 'failed'} ({name})[/bold]")
-            self._auto_scroll_result(section)
-            if ok:
-                if action == "install":
-                    self._mark_installed(name, mgr)
-                elif action == "remove":
-                    self._mark_removed(name, mgr)
-        except Exception as e:
-            result.update(f"[bold red]Error: {e}[/bold red]")
-            self._auto_scroll_result(section)
+        self._start_operation(action, section, name, PackageManager(mgr_str))
 
     async def _do_tool_action(self, action: str):
         name, mgr_str = self._get_cursor_row("tools")
@@ -388,23 +399,7 @@ class StoreScreen(Screen):
         if not name or not mgr_str or mgr_str == "system":
             result.update("[bold red]No installable tool selected (no system package manager found)[/bold red]")
             return
-        mgr = PackageManager(mgr_str)
-        labels = {"install": ("📥 Installing", "Install"), "update": ("🔄 Updating", "Update")}
-        emoji, title = labels[action]
-        try:
-            result.update(f"[yellow]{emoji} {title} {name}...[/yellow]")
-            self._auto_scroll_result("tools")
-            ok = await asyncio.to_thread(getattr(self._ps, action), name, mgr)
-            icon = "✓" if ok else "✗"
-            result.update(f"[bold]{icon} {title} {'succeeded' if ok else 'failed'} ({name})[/bold]")
-            self._auto_scroll_result("tools")
-            if ok:
-                self._tools = detect_tools()
-                self.query_one("#tools-table", ToolsTable).show_tools(self._tools)
-                self._update_tools_actions()
-        except Exception as e:
-            result.update(f"[bold red]Error: {e}[/bold red]")
-            self._auto_scroll_result("tools")
+        self._start_operation(action, "tools", name, PackageManager(mgr_str))
 
     def _mark_installed(self, name, mgr):
         if (name, mgr) not in self._installed_set:

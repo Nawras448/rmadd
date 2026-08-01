@@ -1,6 +1,7 @@
 import time
 import concurrent.futures
-from typing import Optional
+from threading import Event
+from typing import Callable, Optional
 
 from features.package_store.ports import GetPackagesUseCase, InstallPackageUseCase, PackageDataSource
 from features.package_store.domain import Package, PackageManager, Repo, PackageCollection
@@ -75,14 +76,39 @@ class PackageManagerService(GetPackagesUseCase, InstallPackageUseCase):
     def list_repos(self, manager: PackageManager) -> list:
         return self._source(manager).list_repos()
 
-    def install(self, name: str, manager: PackageManager, progress_callback=None) -> bool:
-        return self._source(manager).install(name)
+    def install(
+        self,
+        name: str,
+        manager: PackageManager,
+        progress_callback=None,
+        on_output: Optional[Callable[[str], None]] = None,
+        cancel_event: Optional[Event] = None,
+    ) -> bool:
+        return self._source(manager).install(name, on_output, cancel_event)
 
-    def remove(self, name: str, manager: PackageManager, progress_callback=None) -> bool:
-        return self._source(manager).remove(name)
+    def remove(
+        self,
+        name: str,
+        manager: PackageManager,
+        progress_callback=None,
+        on_output: Optional[Callable[[str], None]] = None,
+        cancel_event: Optional[Event] = None,
+    ) -> bool:
+        return self._source(manager).remove(name, on_output, cancel_event)
 
-    def update(self, name: str, manager: PackageManager) -> bool:
-        return self._source(manager).update(name)
+    def update(
+        self,
+        name: str,
+        manager: PackageManager,
+        on_output: Optional[Callable[[str], None]] = None,
+        cancel_event: Optional[Event] = None,
+    ) -> bool:
+        return self._source(manager).update(name, on_output, cancel_event)
 
-    def update_all(self, manager: PackageManager) -> bool:
-        return self._source(manager).update_all()
+    def update_all(
+        self,
+        manager: PackageManager,
+        on_output: Optional[Callable[[str], None]] = None,
+        cancel_event: Optional[Event] = None,
+    ) -> bool:
+        return self._source(manager).update_all(on_output, cancel_event)

@@ -1,7 +1,10 @@
 import os
+import signal
 import subprocess
 import shutil
-from typing import Optional
+import threading
+import time
+from typing import Callable, Optional
 
 from features.package_store.ports import PackageDataSource
 from features.package_store.domain import Package, PackageManager, PackageStatus, Repo
@@ -20,53 +23,129 @@ class _BaseAdapter(PackageDataSource):
         except Exception:
             return ""
 
+    def _privilege_prefix(self) -> list:
+        if os.geteuid() == 0:
+            return []
+        for tool in ("pkexec", "sudo"):
+            if shutil.which(tool):
+                return [tool]
+        return []
+
     def _run_priv(self, cmd: list, timeout: int = 300) -> bool:
+        ok, _ = self._run_priv_stream(cmd, None, None, timeout)
+        return ok
+
+    def _run_priv_stream(
+        self,
+        cmd: list,
+        on_output: Optional[Callable[[str], None]],
+        cancel_event: Optional[threading.Event],
+        timeout: int = 600,
+    ) -> tuple:
+        """Run a privileged command, streaming output line by line.
+
+        Returns (ok: bool, cancelled: bool). When cancel_event is set the
+        process group is terminated (SIGTERM, then SIGKILL after a grace
+        period). Output lines are delivered to on_output (may be None).
+        The reader runs in a daemon thread so cancellation works even while
+        the child process is silent (e.g. waiting at an auth prompt).
+        """
         if not self._available:
             raise RuntimeError(f"{self._manager.value} is not available on this system")
         if os.geteuid() == 0:
+            candidates = [[]]
+        else:
+            candidates = [[t] for t in ("pkexec", "sudo") if shutil.which(t)]
+        if not candidates:
+            raise RuntimeError("No privilege escalation tool available (need pkexec or sudo)")
+
+        tail: list[str] = []
+        last_rc = 1
+        last_cancelled = False
+        for prefix in candidates:
+            proc = None
             try:
-                subprocess.run(cmd, timeout=timeout, capture_output=True, text=True, check=True)
-                return True
-            except subprocess.CalledProcessError as e:
-                raise RuntimeError(f"Command failed (exit {e.returncode})")
-            except Exception as e:
-                raise RuntimeError(str(e))
-        for tool in ("pkexec", "sudo"):
-            priv = shutil.which(tool)
-            if not priv:
-                continue
-            try:
-                result = subprocess.run(
-                    [priv] + cmd, timeout=timeout,
-                    capture_output=True, text=True
+                proc = subprocess.Popen(
+                    prefix + cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    start_new_session=True,
                 )
-                if result.returncode == 0:
-                    return True
-                err = result.stderr.strip()
-                if not err or "cancelled" in err.lower():
-                    return False
-                if tool == "pkexec" and ("not authorized" in err.lower() or "no authentication agent" in err.lower()):
+                reader = threading.Thread(
+                    target=self._drain, args=(proc, on_output, tail), daemon=True
+                )
+                reader.start()
+                deadline = time.monotonic() + timeout
+                while proc.poll() is None:
+                    if cancel_event is not None and cancel_event.is_set():
+                        last_cancelled = True
+                        break
+                    if time.monotonic() > deadline:
+                        raise RuntimeError("Command timed out")
+                    time.sleep(0.05)
+                reader.join(timeout=2)
+                last_rc = proc.returncode or 1
+                if last_rc == 0:
+                    return (True, False)
+                err = "".join(tail).strip().lower()
+                if last_cancelled:
+                    return (False, True)
+                if prefix and prefix[0] == "pkexec" and any(
+                    w in err
+                    for w in ("not authorized", "no authentication agent", "no polkit", "authentication required")
+                ):
                     continue
-                raise RuntimeError(err)
-            except subprocess.TimeoutExpired:
-                raise RuntimeError("Command timed out")
-            except RuntimeError:
-                raise
-            except Exception as e:
-                raise RuntimeError(str(e))
-        raise RuntimeError("No privilege escalation tool available (need pkexec or sudo)")
+                return (False, last_cancelled)
+            finally:
+                self._terminate(proc)
+        return (False, last_cancelled)
 
-    def install(self, name: str) -> bool:
-        return self._run_priv(self._install_cmd(name))
+    @staticmethod
+    def _drain(proc: subprocess.Popen, on_output, tail: list):
+        try:
+            for line in proc.stdout:
+                if tail is not None:
+                    tail.append(line)
+                    if len(tail) > 20:
+                        tail.pop(0)
+                if on_output is not None:
+                    on_output(line)
+        except Exception:
+            pass
 
-    def remove(self, name: str) -> bool:
-        return self._run_priv(self._remove_cmd(name))
+    @staticmethod
+    def _terminate(proc: Optional[subprocess.Popen]):
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+            proc.wait(timeout=2)
+        except Exception:
+            pass
+        if proc.poll() is None:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait(timeout=2)
+            except Exception:
+                pass
 
-    def update(self, name: str) -> bool:
-        return self._run_priv(self._update_cmd(name))
+    def install(self, name: str, on_output=None, cancel_event=None) -> bool:
+        ok, _ = self._run_priv_stream(self._install_cmd(name), on_output, cancel_event)
+        return ok
 
-    def update_all(self) -> bool:
-        return self._run_priv(self._update_all_cmd())
+    def remove(self, name: str, on_output=None, cancel_event=None) -> bool:
+        ok, _ = self._run_priv_stream(self._remove_cmd(name), on_output, cancel_event)
+        return ok
+
+    def update(self, name: str, on_output=None, cancel_event=None) -> bool:
+        ok, _ = self._run_priv_stream(self._update_cmd(name), on_output, cancel_event)
+        return ok
+
+    def update_all(self, on_output=None, cancel_event=None) -> bool:
+        ok, _ = self._run_priv_stream(self._update_all_cmd(), on_output, cancel_event)
+        return ok
 
     def _install_cmd(self, name: str) -> list:
         raise NotImplementedError

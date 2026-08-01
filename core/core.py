@@ -4,7 +4,7 @@ import subprocess
 
 class SystemInfo:
 
-    # قاموس يعرّف مديري الحزم والأوامر الخاصة بهم
+    # Mapping of package managers to commands that count their packages
     PACKAGE_MANAGERS = {
         "apt": "dpkg-query -f '${binary:Package}\n' -W | wc -l",
         "snap": "snap list | tail -n +2 | wc -l",
@@ -14,7 +14,7 @@ class SystemInfo:
     }
 
     def get_package_count(self, manager_name: str) -> str:
-        """تحقق من وجود مدير الحزم وتنفيذ أمره"""
+        """Check that the package manager exists and run its count command"""
         if not shutil.which(manager_name):
             return "N/A"
 
@@ -31,7 +31,7 @@ class SystemInfo:
             return "0"
 
     def get_all_counts(self) -> dict:
-        """جلب أعداد كل الحزم المتاحة في النظام"""
+        """Fetch the package counts of all available managers"""
         counts = {}
         for pm in self.PACKAGE_MANAGERS:
             count = self.get_package_count(pm)
@@ -40,7 +40,7 @@ class SystemInfo:
         return counts
 
     def get_system_info(self) -> dict:
-        """جلب معلومات النظام الأساسية"""
+        """Fetch basic system information"""
         try:
             hostname = subprocess.run(
                 "hostname", shell=True, capture_output=True, text=True, check=True

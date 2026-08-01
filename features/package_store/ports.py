@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from threading import Event
 from typing import Callable, Optional
 
 from features.package_store.domain import Package, PackageManager, Repo, PackageCollection
@@ -32,19 +33,44 @@ class GetPackagesUseCase(ABC):
 
 class InstallPackageUseCase(ABC):
     @abstractmethod
-    def install(self, name: str, manager: PackageManager, progress_callback: Optional[Callable] = None) -> bool:
+    def install(
+        self,
+        name: str,
+        manager: PackageManager,
+        progress_callback: Optional[Callable] = None,
+        on_output: Optional[Callable[[str], None]] = None,
+        cancel_event: Optional[Event] = None,
+    ) -> bool:
         pass
 
     @abstractmethod
-    def remove(self, name: str, manager: PackageManager, progress_callback: Optional[Callable] = None) -> bool:
+    def remove(
+        self,
+        name: str,
+        manager: PackageManager,
+        progress_callback: Optional[Callable] = None,
+        on_output: Optional[Callable[[str], None]] = None,
+        cancel_event: Optional[Event] = None,
+    ) -> bool:
         pass
 
     @abstractmethod
-    def update(self, name: str, manager: PackageManager) -> bool:
+    def update(
+        self,
+        name: str,
+        manager: PackageManager,
+        on_output: Optional[Callable[[str], None]] = None,
+        cancel_event: Optional[Event] = None,
+    ) -> bool:
         pass
 
     @abstractmethod
-    def update_all(self, manager: PackageManager) -> bool:
+    def update_all(
+        self,
+        manager: PackageManager,
+        on_output: Optional[Callable[[str], None]] = None,
+        cancel_event: Optional[Event] = None,
+    ) -> bool:
         pass
 
 
