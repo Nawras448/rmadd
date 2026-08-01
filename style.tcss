@@ -312,13 +312,13 @@ Input:ansi:focus {
 
 /* ---------------- checkboxes ---------------- */
 
-#search-managers, #installed-managers {
+#search-managers {
     height: auto;
     max-height: 7;
     margin: 0;
 }
 
-#search-managers Checkbox, #installed-managers Checkbox {
+#search-managers Checkbox {
     height: 1;
     border: none;
     padding: 0 1;
@@ -351,7 +351,7 @@ ToggleButton:ansi.-on > .toggle--button {
     text-style: bold;
 }
 
-#search-managers #all, #installed-managers #all {
+#search-managers #all {
     text-style: bold;
     margin-right: 3;
     color: $secondary;
@@ -366,6 +366,33 @@ ToggleButton:ansi.-on > .toggle--button {
 .tier-row {
     height: auto;
     align: left middle;
+}
+
+#installed-filter-tabs {
+    height: 3;
+    background: $surface;
+    border-bottom: round $primary;
+}
+
+#installed-filter-tabs Tab {
+    height: 2;
+    padding: 0 2;
+    text-align: center;
+    color: $text-muted;
+    text-style: bold;
+}
+
+#installed-filter-tabs Tab:hover {
+    color: #c084fc;
+}
+
+#installed-filter-tabs Tab.-active {
+    color: $secondary;
+}
+
+#installed-filter-tabs Underline > .underline--bar {
+    background: #2dd4bf;
+    color: $background;
 }
 
 /* ---------------- buttons ---------------- */

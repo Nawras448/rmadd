@@ -1,7 +1,7 @@
 import asyncio
 
 from textual.screen import Screen
-from textual.widgets import Header, Footer, Static, Input, DataTable, Button, TabbedContent, TabPane
+from textual.widgets import Header, Footer, Static, Input, DataTable, Button, Tab, TabbedContent, TabPane, Tabs
 from textual.containers import Horizontal, VerticalScroll
 from textual.coordinate import Coordinate
 
@@ -76,7 +76,7 @@ class StoreScreen(Screen):
                 with VerticalScroll(id="pane-scroll-installed"):
                     with Horizontal(id="installed-top"):
                         yield Input(placeholder="Search installed programs...", id="installed-input")
-                    yield ManagerFilter(self._ps.available_managers, id="installed-managers")
+                    yield Tabs(Tab("All", id="tab-all"), id="installed-filter-tabs", active="tab-all")
                     yield PackageTable(id="installed-table")
                     with Horizontal(id="installed-action-bar"):
                         yield Static(id="installed-sel", classes="sel-label")
@@ -148,12 +148,38 @@ class StoreScreen(Screen):
             self._installed_set = {(p.name, p.manager) for p in self._installed_pkgs}
             self._show_installed(PackageCollection(self._installed_pkgs))
             result.update(f"[green]Loaded {pkgs.total} installed packages[/green]")
+            await self._rebuild_installed_tabs()
             if self._active_section == "installed":
                 table._table.focus()
             if self._search_query:
                 asyncio.create_task(self._do_search(self._search_query, self._search_managers))
         except Exception as e:
             result.update(f"[bold red]Error loading packages: {e}[/bold red]")
+
+    async def _rebuild_installed_tabs(self):
+        tabs = self.query_one("#installed-filter-tabs", Tabs)
+        managers = [
+            m
+            for m in self._ps.available_managers
+            if any(p.manager == m for p in self._installed_pkgs)
+        ]
+        current = {
+            tab.id
+            for tab in tabs.query("#tabs-list > Tab").results(Tab)
+            if tab.id and tab.id != "tab-all"
+        }
+        wanted = {f"tab-{m.value}" for m in managers}
+        for tab_id in current - wanted:
+            await tabs.remove_tab(tab_id)
+        for m in managers:
+            if f"tab-{m.value}" not in current:
+                await tabs.add_tab(Tab(m.value.upper(), id=f"tab-{m.value}"))
+        active_id = tabs.active or "tab-all"
+        if active_id == "tab-all":
+            self._installed_managers = None
+        else:
+            self._installed_managers = {PackageManager(active_id.removeprefix("tab-"))}
+        self._filter_installed(self.query_one("#installed-input", Input).value)
 
     def _show_installed(self, collection: PackageCollection):
         if self._installed_managers:
@@ -276,16 +302,23 @@ class StoreScreen(Screen):
         self._active_section = section
         self._open_detail(section)
 
+    def on_tabs_tab_activated(self, event: Tabs.TabActivated):
+        if event.tabs.id != "installed-filter-tabs":
+            return
+        if event.tab.id == "tab-all":
+            self._installed_managers = None
+        else:
+            self._installed_managers = {PackageManager(event.tab.id.removeprefix("tab-"))}
+        self._filter_installed(self.query_one("#installed-input", Input).value)
+
     def on_manager_filter_changed(self, event: ManagerFilter.Changed):
-        if event.filter.id == "search-managers":
-            self._search_managers = event.selected
-            query = self.query_one("#search-input", Input).value
-            if self._debounce_task and not self._debounce_task.done():
-                self._debounce_task.cancel()
-            asyncio.create_task(self._do_search(query, self._search_managers))
-        elif event.filter.id == "installed-managers":
-            self._installed_managers = event.selected
-            self._filter_installed(self.query_one("#installed-input", Input).value)
+        if event.filter.id != "search-managers":
+            return
+        self._search_managers = event.selected
+        query = self.query_one("#search-input", Input).value
+        if self._debounce_task and not self._debounce_task.done():
+            self._debounce_task.cancel()
+        asyncio.create_task(self._do_search(query, self._search_managers))
 
     def on_button_pressed(self, event: Button.Pressed):
         bid = event.button.id
@@ -440,11 +473,13 @@ class StoreScreen(Screen):
             self._installed_set.add((name, mgr))
             self._installed_pkgs.append(Package(name=name, manager=mgr))
         self._refresh_installed_view()
+        asyncio.create_task(self._rebuild_installed_tabs())
 
     def _mark_removed(self, name, mgr):
         self._installed_set.discard((name, mgr))
         self._installed_pkgs = [p for p in self._installed_pkgs if not (p.name == name and p.manager == mgr)]
         self._refresh_installed_view()
+        asyncio.create_task(self._rebuild_installed_tabs())
 
     def _refresh_installed_view(self):
         query = self.query_one("#installed-input", Input).value
