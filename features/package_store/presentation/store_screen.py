@@ -41,7 +41,8 @@ class StoreScreen(Screen):
     def compose(self):
         yield Header(show_clock=True)
         with TabbedContent(initial="pane-search", id="store-tabs"):
-            with TabPane("أدوات التحميل", id="pane-tools"):
+            with TabPane("أدوات التحميل", id="pane-tools") as pane_tools:
+                pane_tools.border_title = "Tools"
                 yield ToolsTable(id="tools-table")
                 with Horizontal(id="tools-action-bar"):
                     yield Static(id="tools-sel", classes="sel-label")
@@ -49,7 +50,8 @@ class StoreScreen(Screen):
                     yield Button("Update", id="btn-tools-update", variant="default")
                 yield Static(id="tools-result")
 
-            with TabPane("البحث عن برنامج", id="pane-search"):
+            with TabPane("البحث عن برنامج", id="pane-search") as pane_search:
+                pane_search.border_title = "Search"
                 with Horizontal(id="search-top"):
                     yield Input(placeholder="Search programs (as you type)...", id="search-input")
                 yield ManagerFilter(self._ps.available_managers, id="search-managers")
@@ -60,7 +62,8 @@ class StoreScreen(Screen):
                     yield Button("Details", id="btn-search-details", variant="default")
                 yield Static(id="search-result")
 
-            with TabPane("البرامج المثبتة", id="pane-installed"):
+            with TabPane("البرامج المثبتة", id="pane-installed") as pane_installed:
+                pane_installed.border_title = "Installed"
                 with Horizontal(id="installed-top"):
                     yield Input(placeholder="Search installed programs...", id="installed-input")
                 yield ManagerFilter(self._ps.available_managers, id="installed-managers")

@@ -21,7 +21,8 @@ class DashboardScreen(Screen):
     def compose(self):
         yield Header(show_clock=True)
         with Horizontal():
-            with Vertical(id="sidebar"):
+            with Vertical(id="sidebar") as sidebar:
+                sidebar.border_title = "Navigation"
                 yield Static("[bold]Navigation[/bold]", id="sidebar-title")
                 yield Button("Dashboard", id="btn_dashboard", variant="primary")
                 yield Button("Full System", id="btn_full_system")

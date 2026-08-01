@@ -7,6 +7,10 @@ from features.package_store.domain import PackageCollection, PackageStatus
 class PackageTable(Vertical):
     can_focus = False
 
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.border_title = "Packages"
+
     def compose(self):
         self._table = DataTable(id="inner-table", cursor_type="row", show_cursor=True, show_row_labels=False)
         yield self._table

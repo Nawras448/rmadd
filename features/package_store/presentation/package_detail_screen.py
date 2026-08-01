@@ -43,6 +43,7 @@ class PackageDetailScreen(Screen):
             f"Summary: {p.summary or 'N/A'}\n"
         )
         self.query_one("#package-info", Static).update(info)
+        self.query_one("#package-info", Static).border_title = "Package Details"
 
     async def on_button_pressed(self, event: Button.Pressed):
         action = {

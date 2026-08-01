@@ -28,6 +28,15 @@ class FullSystemScreen(Screen):
         yield Footer()
 
     async def on_mount(self):
+        for section_id, title in (
+            ("fs-system", "System"),
+            ("fs-cpu", "CPU"),
+            ("fs-memory", "Memory"),
+            ("fs-disks", "Disks"),
+            ("fs-gpu", "GPU"),
+            ("fs-network", "Network"),
+        ):
+            self.query_one(f"#{section_id}", Static).border_title = title
         for section_id in ("fs-system", "fs-cpu", "fs-memory", "fs-disks", "fs-gpu", "fs-network"):
             self.query_one(f"#{section_id}", Static).update("[yellow]Loading...[/yellow]")
         asyncio.create_task(self._load_system())

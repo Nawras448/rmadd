@@ -1,13 +1,67 @@
+/* ============================================================
+   rmadd — Cyberpunk / Neon theme
+   Palette: midnight navy bg, purple/magenta borders,
+   electric cyan/mint accents, light slate text.
+   Core palette is provided by the "cyberpunk" Theme registered
+   in features/ui_switch/presentation/tui/app.py; this sheet only
+   holds layout + component styling.
+   ============================================================ */
+
+/* ---------------- root ---------------- */
+
 Screen {
     layout: horizontal;
+    background: $background;
+    color: $foreground;
 }
+
+Header {
+    background: $background;
+    outline-bottom: round $primary;
+    color: $foreground;
+}
+
+HeaderTitle {
+    color: $secondary;
+    text-style: bold;
+}
+
+HeaderClock {
+    color: $text-muted;
+}
+
+Footer {
+    background: $background;
+    outline-top: round $primary;
+}
+
+FooterKey > .footer-key--key {
+    background: $primary;
+    color: $background;
+    text-style: bold;
+    padding: 0 1;
+}
+
+FooterKey > .footer-key--description {
+    color: $text-muted;
+}
+
+FooterKey:hover > .footer-key--key {
+    background: $accent;
+}
+
+/* ---------------- sidebar / navigation ---------------- */
 
 #sidebar {
     width: 20%;
     height: 100%;
     background: $surface;
-    border-right: heavy $accent;
+    border: round $primary;
+    border-title-color: $secondary;
+    border-title-align: center;
     padding: 1;
+    scrollbar-color: $primary;
+    scrollbar-background: $surface;
 }
 
 #sidebar-title {
@@ -15,19 +69,68 @@ Screen {
     text-align: center;
     text-style: bold;
     padding: 1;
+    color: $secondary;
+}
+
+#sidebar Button {
+    width: 100%;
+    margin: 0 0 1 0;
+    border: none;
+    border-bottom: dashed $border-blurred;
+    background: transparent;
+    color: $foreground;
+    text-align: left;
+    text-style: none;
+}
+
+#sidebar Button:hover {
+    background: #a855f7 15%;
+    color: #c084fc;
+}
+
+#sidebar Button.-primary {
+    border-bottom: dashed $accent;
+    color: $secondary;
+    text-style: bold;
+    background: transparent;
+}
+
+#sidebar Button.-error {
+    color: #f43f5e;
+    background: transparent;
 }
 
 #content {
     width: 80%;
     height: 100%;
     padding: 1;
+    scrollbar-color: $primary;
+    scrollbar-background: $surface;
 }
+
+/* ---------------- generic containers ---------------- */
 
 #store-layout, #detail-layout {
     width: 100%;
     height: 100%;
     padding: 1;
 }
+
+#left-panel, #right-panel {
+    width: 50%;
+    height: 100%;
+}
+
+#full-system-content {
+    width: 100%;
+    height: 100%;
+    padding: 1;
+    overflow-y: auto;
+    scrollbar-color: $primary;
+    scrollbar-background: $surface;
+}
+
+/* ---------------- tabs ---------------- */
 
 #store-tabs {
     height: 1fr;
@@ -38,30 +141,92 @@ Screen {
 TabbedContent > ContentTabs {
     dock: top;
     height: 3;
-    background: $panel;
-    border-bottom: solid $accent;
+    background: $surface;
+    border-bottom: round $primary;
 }
 
 TabbedContent Tab {
     height: 1;
     padding: 0 2;
     text-align: center;
-    color: $foreground 60%;
+    color: $text-muted;
+    text-style: bold;
+}
+
+TabbedContent Tab:hover {
+    color: #c084fc;
 }
 
 TabbedContent Tab.-active {
-    color: $text;
-    background: $accent;
+    color: $secondary;
+    text-style: bold;
+}
+
+Underline > .underline--bar {
+    color: $accent;
+    background: $primary;
+}
+
+Underline:focus > .underline--bar {
+    background: $primary;
 }
 
 TabbedContent > ContentSwitcher {
     height: 1fr;
+    scrollbar-color: $primary;
+    scrollbar-background: $surface;
 }
 
 TabPane {
     height: 100%;
-    border: solid $accent;
+    border: round $primary;
+    border-title-color: #c084fc;
     padding: 1;
+    background: $surface;
+}
+
+/* ---------------- tables ---------------- */
+
+DataTable {
+    height: 1fr;
+    margin: 0;
+    background: $surface;
+    color: $foreground;
+    scrollbar-color: $primary;
+    scrollbar-background: $surface;
+}
+
+DataTable > .datatable--header {
+    background: #1a1030;
+    color: #c084fc;
+    text-style: bold;
+}
+
+DataTable > .datatable--even-row {
+    background: $surface;
+}
+
+DataTable > .datatable--odd-row {
+    background: #11141f;
+}
+
+DataTable > .datatable--cursor {
+    background: #134e4a;
+    color: #e2e8f0;
+}
+
+DataTable:focus > .datatable--cursor {
+    background: #0f766e;
+    color: #e2e8f0;
+}
+
+DataTable > .datatable--hover {
+    background: #a855f7 20%;
+}
+
+DataTable:ansi > .datatable--header {
+    background: #1a1030;
+    color: #c084fc;
 }
 
 #tools-table {
@@ -74,28 +239,61 @@ TabPane {
     margin: 0 0 0 0;
 }
 
-#tools-action-bar, #search-action-bar, #installed-action-bar {
-    height: 3;
-    align: center middle;
-    border: solid $accent;
-    padding: 0 1;
-    margin: 0;
+#package-table {
+    border: round $primary;
+    border-title-color: $secondary;
+    padding: 1;
+    margin: 1;
+    height: 1fr;
+    background: $surface;
 }
 
-#tools-action-bar Button, #search-action-bar Button, #installed-action-bar Button {
-    margin: 0 1;
+#inner-table {
+    height: 100%;
+}
+
+/* ---------------- inputs ---------------- */
+
+Input {
+    background: $surface;
+    border: tall $border-blurred;
+    color: $foreground;
+}
+
+Input:focus {
+    border: tall $accent;
+    color: $secondary;
+}
+
+Input > .input--placeholder {
+    color: $text-muted 60%;
+}
+
+Input:ansi {
+    background: $surface;
+    border: tall $border-blurred;
+    color: $foreground;
+}
+
+Input:ansi:focus {
+    border: tall $accent;
+    color: $secondary;
 }
 
 #search-top, #installed-top {
     height: 3;
     align: center middle;
     margin: 0;
+    background: $surface;
+    border: round $primary;
 }
 
 #search-top Input, #installed-top Input {
     width: 1fr;
     margin: 0;
 }
+
+/* ---------------- checkboxes ---------------- */
 
 #search-managers, #installed-managers {
     height: 3;
@@ -105,38 +303,182 @@ TabPane {
 
 #search-managers Checkbox, #installed-managers Checkbox {
     margin: 0 1 0 0;
+    background: transparent;
+    color: $foreground;
+}
+
+Checkbox > .toggle--button {
+    color: #c084fc;
+    background: transparent;
+}
+
+Checkbox.-on > .toggle--button {
+    color: $accent;
+    text-style: bold;
+}
+
+Checkbox:focus > .toggle--button {
+    color: $secondary;
+}
+
+ToggleButton:ansi > .toggle--button {
+    color: #c084fc;
+    background: transparent;
+}
+
+ToggleButton:ansi.-on > .toggle--button {
+    color: $accent;
+    text-style: bold;
 }
 
 #search-managers #all, #installed-managers #all {
     text-style: bold;
     margin-right: 3;
+    color: $secondary;
 }
 
-#tools-result, #search-result, #installed-result {
+/* ---------------- buttons ---------------- */
+
+Button, Button.-style-default {
+    margin: 0 1;
+    text-style: bold;
+    background: $surface;
+    border: tall $primary;
+    color: $text-accent;
+}
+
+Button.-style-default:hover {
+    background: #a855f7 25%;
+    color: #c084fc;
+    border-top: tall $primary;
+    border-bottom: tall $primary;
+}
+
+Button.-style-default:focus {
+    border: tall $accent;
+}
+
+Button.-style-default.-primary {
+    background: #7c3aed;
+    border: tall #c084fc;
+    color: $background;
+}
+
+Button.-style-default.-primary:hover {
+    background: #9333ea;
+    border-top: tall #c084fc;
+    border-bottom: tall #c084fc;
+}
+
+Button.-style-default.-error {
+    background: #be185d;
+    border: tall #f43f5e;
+    color: $background;
+}
+
+Button.-style-default.-error:hover {
+    background: #e11d48;
+    border-top: tall #f43f5e;
+    border-bottom: tall #f43f5e;
+}
+
+Button.-style-default.-success {
+    background: #059669;
+    border: tall #2dd4bf;
+    color: $background;
+}
+
+Button.-style-default.-success:hover {
+    background: #10b981;
+    border-top: tall #2dd4bf;
+    border-bottom: tall #2dd4bf;
+}
+
+Button.-style-default.-warning {
+    background: #b45309;
+    border: tall #fbbf24;
+    color: $background;
+}
+
+Button.-style-default.-warning:hover {
+    background: #d97706;
+    border-top: tall #fbbf24;
+    border-bottom: tall #fbbf24;
+}
+
+Button:ansi, Button:ansi.-style-flat, Button:ansi.-style-default,
+Button:ansi.-style-flat:hover, Button:ansi.-style-default:hover {
+    background: $surface;
+    border: tall $primary;
+    color: $text-accent;
+}
+
+Button:ansi.-style-flat.-primary, Button:ansi.-style-default.-primary {
+    background: #7c3aed;
+    border: tall #c084fc;
+    color: $background;
+}
+
+Button:ansi.-style-flat.-error, Button:ansi.-style-default.-error {
+    background: #be185d;
+    border: tall #f43f5e;
+    color: $background;
+}
+
+Button:ansi.-style-flat.-success, Button:ansi.-style-default.-success {
+    background: #059669;
+    border: tall #2dd4bf;
+    color: $background;
+}
+
+Button:ansi.-style-flat.-warning, Button:ansi.-style-default.-warning {
+    background: #b45309;
+    border: tall #fbbf24;
+    color: $background;
+}
+
+#tools-action-bar Button, #search-action-bar Button, #installed-action-bar Button, #actions Button, #action-bar Button {
+    margin: 0 1;
+}
+
+/* ---------------- action bars & result strips ---------------- */
+
+#tools-action-bar, #search-action-bar, #installed-action-bar, #action-bar {
+    height: 3;
+    align: center middle;
+    border: round $primary;
+    padding: 0 1;
+    margin: 0;
+    background: $surface;
+}
+
+#action-bar {
+    margin: 1 0;
+}
+
+#tools-result, #search-result, #installed-result, #action-result, #action-result-store {
     height: 1;
-    background: $panel;
-    border-top: dashed $primary;
+    background: $surface;
+    border-top: dashed $accent;
     text-align: center;
     padding: 0 2;
     width: 100%;
+    color: $secondary;
+    text-style: bold;
 }
 
-DataTable {
-    height: 1fr;
-    margin: 0;
+#action-result-store {
+    height: 3;
 }
 
-.monitor-card {
-    border: solid $primary;
-    padding: 1;
-    margin: 1;
-    height: auto;
-}
-
-.detail-card {
-    border: solid $accent;
-    padding: 2;
-    margin: 1;
+.sel-label {
+    padding: 0 2;
+    text-style: bold;
+    background: $accent;
+    color: $background;
+    width: auto;
+    max-width: 45%;
+    text-overflow: ellipsis;
 }
 
 #actions {
@@ -144,85 +486,85 @@ DataTable {
     height: 5;
 }
 
-#actions Button {
-    margin: 0 1;
+/* ---------------- cards & panels ---------------- */
+
+.monitor-card {
+    border: round $primary;
+    border-title-color: #c084fc;
+    padding: 1;
+    margin: 1;
+    height: auto;
+    background: $surface;
+    scrollbar-color: $primary;
+    scrollbar-background: $surface;
 }
 
-#action-result {
-    height: 3;
-    background: $panel;
-    border-top: heavy $primary;
-    text-align: center;
-    padding: 0 2;
-    width: 100%;
+.detail-card {
+    border: round $primary;
+    border-title-color: #c084fc;
+    padding: 2;
+    margin: 1;
+    background: $surface;
 }
 
-#left-panel, #right-panel {
-    width: 50%;
-    height: 100%;
+#system-card {
+    border: round $primary;
+    border-title-color: $secondary;
+    padding: 1;
+    margin: 1;
+    background: $surface;
 }
 
-Button {
-    margin: 0 1;
+#cpu-graph {
+    border: round $primary;
+    border-title-color: $secondary;
+    padding: 1;
+    margin: 1;
+    background: $surface;
+}
+
+.fs-section {
+    border: round $primary;
+    border-title-color: #c084fc;
+    padding: 1;
+    margin: 0 0 1 0;
+    height: auto;
+    background: $surface;
 }
 
 #package-info {
     padding: 1;
 }
 
-#system-card {
-    border: solid $primary;
+/* ---------------- toasts ---------------- */
+
+Toast {
+    background: $panel;
+    border: round $primary;
     padding: 1;
-    margin: 1;
 }
 
-#package-table {
-    border: solid $accent;
-    padding: 1;
-    margin: 1;
-    height: 1fr;
+Toast:ansi {
+    background: $panel;
 }
 
-#full-system-content {
-    width: 100%;
-    height: 100%;
-    padding: 1;
-    overflow-y: auto;
-}
-
-.fs-section {
-    border: solid $surface;
-    padding: 1;
-    margin: 0 0 1 0;
-    height: auto;
-}
-
-#action-bar {
-    height: 3;
-    align: center middle;
-    border: solid $accent;
-    padding: 0 1;
-    margin: 1 0;
-}
-
-#action-bar Button {
-    margin: 0 1;
-}
-
-.sel-label {
-    padding: 0 2;
+Toast > .toast--title {
+    color: $foreground;
     text-style: bold;
 }
 
-#action-result-store {
-    height: 3;
-    background: $panel;
-    border-top: heavy $primary;
-    text-align: center;
-    padding: 0 2;
-    width: 100%;
+Toast.-information {
+    border-left: outer $accent;
 }
 
-#inner-table {
-    height: 100%;
+Toast.-information .toast--title {
+    color: $text-success;
+}
+
+Toast.-warning {
+    border-left: outer $warning;
+}
+
+Toast.-error {
+    border-left: outer $error;
 }

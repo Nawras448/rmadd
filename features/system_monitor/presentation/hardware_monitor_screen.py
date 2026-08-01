@@ -31,6 +31,13 @@ class HardwareMonitorScreen(Screen):
         yield Footer()
 
     async def on_mount(self):
+        for widget_id, title in (
+            ("#memory-info", "Memory"),
+            ("#disk-info", "Disks"),
+            ("#gpu-info", "GPU"),
+            ("#network-info", "Network"),
+        ):
+            self.query_one(widget_id, Static).border_title = title
         await self._refresh()
         self._timer = self.set_interval(2, self._refresh)
 
@@ -50,7 +57,7 @@ class HardwareMonitorScreen(Screen):
             f"Total: {mem.total_gb:.1f} GB\n"
             f"Used: {mem.used_gb:.1f} GB  Available: {mem.available_gb:.1f} GB\n"
             f"Swap: {mem.swap_used_gb:.1f} / {mem.swap_total_gb:.1f} GB\n"
-            f"[reverse]{mem_bar}[/reverse] {mem.usage_percent}%\n"
+            f"[#2dd4bf on #0f111a]{mem_bar}[/] {mem.usage_percent}%\n"
         )
 
         disk_w = self.query_one("#disk-info", Static)
@@ -60,7 +67,7 @@ class HardwareMonitorScreen(Screen):
             disk_lines.append(
                 f"{d.device} ({d.mount_point or '?'}):\n"
                 f"{d.used_gb}/{d.total_gb} GB\n"
-                f"[reverse]{bar}[/reverse] {d.usage_percent}%\n"
+                f"[#2dd4bf on #0f111a]{bar}[/] {d.usage_percent}%\n"
             )
         disk_w.update("\n".join(disk_lines))
 
