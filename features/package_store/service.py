@@ -55,6 +55,11 @@ class PackageManagerService(GetPackagesUseCase, InstallPackageUseCase):
                         results.append(p)
                 except Exception:
                     continue
+        registered = {p.name for p in results if p.manager != PackageManager.LOCAL}
+        results = [
+            p for p in results
+            if p.manager != PackageManager.LOCAL or p.name not in registered
+        ]
         return PackageCollection(results)
 
     def search(self, query: str, manager: PackageManager | None = None) -> PackageCollection:

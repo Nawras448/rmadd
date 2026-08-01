@@ -34,6 +34,8 @@ class PackageManager(str, Enum):
     GO = "go"
     GEM = "gem"
     COMPOSER = "composer"
+    # --- Standalone local binaries (not package-managed) ---
+    LOCAL = "local"
 
 
 class PackageManagerTier(str, Enum):
@@ -77,6 +79,7 @@ TIER_MAP: dict[PackageManager, PackageManagerTier] = {
     PackageManager.GO: PackageManagerTier.ECOSYSTEM,
     PackageManager.GEM: PackageManagerTier.ECOSYSTEM,
     PackageManager.COMPOSER: PackageManagerTier.ECOSYSTEM,
+    PackageManager.LOCAL: PackageManagerTier.ECOSYSTEM,
 }
 
 TIER_LABELS: dict[PackageManagerTier, str] = {
@@ -252,6 +255,13 @@ MANAGER_META: dict[PackageManager, ManagerMeta] = {
         (),
         False,
         frozenset({"install", "remove", "update", "list_installed"}),
+    ),
+    PackageManager.LOCAL: ManagerMeta(
+        "Local Binary",
+        (),
+        (),
+        False,
+        frozenset({"list_installed", "remove"}),
     ),
 }
 

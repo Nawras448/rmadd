@@ -1480,6 +1480,9 @@ class ComposerAdapter(BaseAdapter):
     def _update_cmd(self, name: str) -> list: return ["composer", "global", "update", name]
 
 
+from features.package_store.binary_scanner import LocalBinaryAdapter
+
+
 ADAPTER_FACTORIES: dict[PackageManager, type] = {
     PackageManager.APT: AptAdapter,
     PackageManager.DPKG: DpkgAdapter,
@@ -1508,4 +1511,5 @@ ADAPTER_FACTORIES: dict[PackageManager, type] = {
     PackageManager.GO: GoAdapter,
     PackageManager.GEM: GemAdapter,
     PackageManager.COMPOSER: ComposerAdapter,
+    PackageManager.LOCAL: LocalBinaryAdapter,
 }

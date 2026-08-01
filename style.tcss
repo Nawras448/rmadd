@@ -273,12 +273,12 @@ DataTable:ansi > .datatable--header {
 
 Input {
     background: $surface;
-    border: tall $border-blurred;
+    border: round $border-blurred;
     color: $foreground;
 }
 
 Input:focus {
-    border: tall $accent;
+    border: round #10b981;
     color: $secondary;
 }
 
@@ -288,17 +288,17 @@ Input > .input--placeholder {
 
 Input:ansi {
     background: $surface;
-    border: tall $border-blurred;
+    border: round $border-blurred;
     color: $foreground;
 }
 
 Input:ansi:focus {
-    border: tall $accent;
+    border: round #10b981;
     color: $secondary;
 }
 
 #search-top, #installed-top {
-    height: 3;
+    height: auto;
     align: center middle;
     margin: 0;
     background: $surface;
@@ -307,74 +307,20 @@ Input:ansi:focus {
 
 #search-top Input, #installed-top Input {
     width: 1fr;
-    margin: 0;
-}
-
-/* ---------------- checkboxes ---------------- */
-
-#search-managers {
-    height: auto;
-    max-height: 7;
-    margin: 0;
-}
-
-#search-managers Checkbox {
-    height: 1;
-    border: none;
+    height: 3;
     padding: 0 1;
-    margin: 0 1 0 0;
-    background: transparent;
-    color: $foreground;
-}
-
-Checkbox > .toggle--button {
-    color: #c084fc;
-    background: transparent;
-}
-
-Checkbox.-on > .toggle--button {
-    color: $accent;
-    text-style: bold;
-}
-
-Checkbox:focus > .toggle--button {
-    color: $secondary;
-}
-
-ToggleButton:ansi > .toggle--button {
-    color: #c084fc;
-    background: transparent;
-}
-
-ToggleButton:ansi.-on > .toggle--button {
-    color: $accent;
-    text-style: bold;
-}
-
-#search-managers #all {
-    text-style: bold;
-    margin-right: 3;
-    color: $secondary;
-}
-
-.tier-label {
-    text-style: bold;
-    color: $secondary;
     margin: 0;
 }
 
-.tier-row {
-    height: auto;
-    align: left middle;
-}
+/* ---------------- filter tabs ---------------- */
 
-#installed-filter-tabs {
+#installed-filter-tabs, #search-filter-tabs {
     height: 3;
     background: $surface;
     border-bottom: round $primary;
 }
 
-#installed-filter-tabs Tab {
+#installed-filter-tabs Tab, #search-filter-tabs Tab {
     height: 2;
     padding: 0 2;
     text-align: center;
@@ -382,15 +328,16 @@ ToggleButton:ansi.-on > .toggle--button {
     text-style: bold;
 }
 
-#installed-filter-tabs Tab:hover {
+#installed-filter-tabs Tab:hover, #search-filter-tabs Tab:hover {
     color: #c084fc;
 }
 
-#installed-filter-tabs Tab.-active {
+#installed-filter-tabs Tab.-active, #search-filter-tabs Tab.-active {
     color: $secondary;
 }
 
-#installed-filter-tabs Underline > .underline--bar {
+#installed-filter-tabs Underline > .underline--bar,
+#search-filter-tabs Underline > .underline--bar {
     background: #2dd4bf;
     color: $background;
 }

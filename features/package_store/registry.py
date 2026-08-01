@@ -59,7 +59,7 @@ def distro_family(path: str = OS_RELEASE_PATH) -> list:
 
 
 def is_available(manager: PackageManager) -> bool:
-    if manager == PackageManager.APPIMAGE:
+    if manager in (PackageManager.APPIMAGE, PackageManager.LOCAL):
         return True
     return any(shutil.which(binary) is not None for binary in meta(manager).binaries)
 

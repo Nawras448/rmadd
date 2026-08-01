@@ -10,9 +10,14 @@ from features.package_store.presentation.install_progress_screen import InstallP
 from features.package_store.presentation.appimage_install_screen import AppImageInstallScreen
 from features.package_store.presentation.package_table import PackageTable, apply_pane_floor
 from features.package_store.presentation.tools_table import ToolsTable
-from features.package_store.presentation.manager_filter import ManagerFilter
 from features.package_store.installer_tools import detect_tools
-from features.package_store.domain import PackageManager, PackageStatus, Package, PackageCollection
+from features.package_store.domain import (
+    PackageManager,
+    PackageStatus,
+    Package,
+    PackageCollection,
+    supports,
+)
 
 
 class StoreScreen(Screen):
@@ -62,7 +67,16 @@ class StoreScreen(Screen):
                 with VerticalScroll(id="pane-scroll-search"):
                     with Horizontal(id="search-top"):
                         yield Input(placeholder="Search programs (as you type)...", id="search-input")
-                    yield ManagerFilter(self._ps.available_managers, id="search-managers")
+                    yield Tabs(
+                        Tab("All", id="tab-all"),
+                        *[
+                            Tab(m.value.upper(), id=f"tab-{m.value}")
+                            for m in self._ps.available_managers
+                            if supports(m, "search")
+                        ],
+                        id="search-filter-tabs",
+                        active="tab-all",
+                    )
                     yield PackageTable(id="search-table")
                     with Horizontal(id="search-action-bar"):
                         yield Static(id="search-sel", classes="sel-label")
@@ -303,22 +317,22 @@ class StoreScreen(Screen):
         self._open_detail(section)
 
     def on_tabs_tab_activated(self, event: Tabs.TabActivated):
-        if event.tabs.id != "installed-filter-tabs":
-            return
-        if event.tab.id == "tab-all":
-            self._installed_managers = None
-        else:
-            self._installed_managers = {PackageManager(event.tab.id.removeprefix("tab-"))}
-        self._filter_installed(self.query_one("#installed-input", Input).value)
-
-    def on_manager_filter_changed(self, event: ManagerFilter.Changed):
-        if event.filter.id != "search-managers":
-            return
-        self._search_managers = event.selected
-        query = self.query_one("#search-input", Input).value
-        if self._debounce_task and not self._debounce_task.done():
-            self._debounce_task.cancel()
-        asyncio.create_task(self._do_search(query, self._search_managers))
+        if event.tabs.id == "installed-filter-tabs":
+            if event.tab.id == "tab-all":
+                self._installed_managers = None
+            else:
+                self._installed_managers = {PackageManager(event.tab.id.removeprefix("tab-"))}
+            self._filter_installed(self.query_one("#installed-input", Input).value)
+        elif event.tabs.id == "search-filter-tabs":
+            if event.tab.id == "tab-all":
+                self._search_managers = None
+            else:
+                self._search_managers = {PackageManager(event.tab.id.removeprefix("tab-"))}
+            if self._debounce_task and not self._debounce_task.done():
+                self._debounce_task.cancel()
+            asyncio.create_task(
+                self._do_search(self.query_one("#search-input", Input).value, self._search_managers)
+            )
 
     def on_button_pressed(self, event: Button.Pressed):
         bid = event.button.id
