@@ -130,11 +130,14 @@ class PackageTable(Vertical):
         for label, w in zip(labels, self._package_widths(self._table.size.width)):
             self._table.add_column(label, width=w)
 
-    def show_counts(self, counts: dict):
+    def show_counts(self, counts: dict, *, loading: bool = False):
         self._table.clear(columns=True)
         self._row_keys = []
         self._row_cells = {}
         self._table.add_columns("Manager", "Count")
+        if loading:
+            self._table.add_row("…", "Loading…")
+            return
         ordered = []
         for key, count in counts.items():
             try:

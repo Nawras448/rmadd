@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from textual.screen import Screen
 from textual.widgets import Header, Footer, Static, Input, DataTable, Button, Tab, TabbedContent, TabPane, Tabs
@@ -19,6 +20,9 @@ from features.package_store.domain import (
     PackageCollection,
     supports,
 )
+from shared.logging import get_logger
+
+logger = get_logger("store_screen")
 
 
 class StoreScreen(Screen):
@@ -39,6 +43,12 @@ class StoreScreen(Screen):
         self._tasks: list[asyncio.Task] = []
         self._local_adapter = None
         self._local_pkgs: list[Package] = []
+        self._stats_interval = None
+        self._stats_busy = False
+        self._stats_loaded = False
+        self._installed_busy = False
+        self._installed_loaded = False
+        self._installed_loaded_at = 0.0
 
     BINDINGS = [
         ("enter", "select", "Details"),
@@ -97,7 +107,16 @@ class StoreScreen(Screen):
                 with VerticalScroll(id="pane-scroll-installed"):
                     with Horizontal(id="installed-top"):
                         yield Input(placeholder="Search installed programs...", id="installed-input")
-                    yield Tabs(Tab("All", id="tab-all"), id="installed-filter-tabs", active="tab-all")
+                    yield Tabs(
+                        Tab("All", id="tab-all"),
+                        *[
+                            Tab(m.value.upper(), id=f"tab-{m.value}")
+                            for m in self._ps.available_managers
+                            if supports(m, "list_installed")
+                        ],
+                        id="installed-filter-tabs",
+                        active="tab-all",
+                    )
                     yield PackageTable(id="installed-table")
                     with Horizontal(id="installed-action-bar"):
                         yield Static(id="installed-sel", classes="sel-label")
@@ -171,8 +190,10 @@ class StoreScreen(Screen):
         self._update_installed_actions()
         self._track(self._do_load_installed())
         self._track(self._load_stats())
+        self._stats_interval = self.set_interval(5.0, self._on_stats_tick)
 
     def _track(self, coro) -> asyncio.Task:
+        self._tasks = [t for t in self._tasks if not t.done()]
         task = asyncio.create_task(coro)
         self._tasks.append(task)
         return task
@@ -185,6 +206,8 @@ class StoreScreen(Screen):
             self._debounce_task.cancel()
         if self._filter_task and not self._filter_task.done():
             self._filter_task.cancel()
+        if self._stats_interval is not None:
+            self._stats_interval.stop()
 
     def on_resize(self, event):
         for section in ("tools", "search", "installed", "local"):
@@ -193,52 +216,74 @@ class StoreScreen(Screen):
             except Exception:
                 pass
 
+    def _on_stats_tick(self):
+        if self.is_mounted:
+            self._track(self._load_stats())
+
     async def _load_stats(self):
-        if not self.is_mounted:
+        if not self.is_mounted or self._stats_busy:
             return
-        card = self.query_one("#system-card", SystemCard)
-        counts_table = self.query_one("#package-table", PackageTable)
-        card.update("[yellow]Loading system info...[/yellow]")
-        counts_table.show_counts({})
+        self._stats_busy = True
         try:
-            info = await asyncio.to_thread(self._ss.get_system_info)
-            if self.is_mounted:
-                card.display_info(info)
-        except Exception as e:
-            if self.is_mounted:
-                card.update(f"[bold red]Error loading system info: {e}[/bold red]")
-        try:
-            counts = await asyncio.to_thread(self._ps.get_all_counts)
-            if self.is_mounted:
-                counts_table.show_counts(counts)
-        except Exception as e:
-            if self.is_mounted:
-                counts_table.show_counts({"error": str(e)})
+            card = self.query_one("#system-card", SystemCard)
+            counts_table = self.query_one("#package-table", PackageTable)
+            if not self._stats_loaded:
+                card.update("[yellow]Fetching system info & package counts…[/yellow]")
+                counts_table.show_counts({}, loading=True)
+            self._ss.refresh()
+            try:
+                info = await asyncio.to_thread(self._ss.get_system_info)
+                if self.is_mounted:
+                    card.display_info(info)
+            except Exception as e:
+                logger.exception("get_system_info failed")
+                if self.is_mounted:
+                    card.update(f"[bold red]Error loading system info: {e}[/bold red]")
+            try:
+                counts = await asyncio.to_thread(self._ps.get_all_counts)
+                if self.is_mounted:
+                    counts_table.show_counts(counts)
+            except Exception as e:
+                logger.exception("get_all_counts failed")
+                if self.is_mounted:
+                    counts_table.show_counts({"error": str(e)})
+            self._stats_loaded = True
+        finally:
+            self._stats_busy = False
 
     def _refresh_stats(self):
         self._track(self._load_stats())
 
     async def _do_load_installed(self):
-        if not self.is_mounted:
+        if not self.is_mounted or self._installed_busy:
             return
-        result = self._result("installed")
-        table = self.query_one("#installed-table", PackageTable)
+        self._installed_busy = True
         try:
-            pkgs = await asyncio.to_thread(self._ps.list_installed)
-            if not self.is_mounted:
-                return
-            self._installed_pkgs = list(pkgs)
-            self._installed_set = {(p.name, p.manager) for p in self._installed_pkgs}
-            self._show_installed(PackageCollection(self._installed_pkgs))
-            result.update(f"[green]Loaded {pkgs.total} installed packages[/green]")
-            await self._rebuild_installed_tabs()
-            if self._active_section == "installed":
-                table._table.focus()
-            if self._search_query:
-                self._track(self._do_search(self._search_query, self._search_managers))
-        except Exception as e:
-            if self.is_mounted:
-                result.update(f"[bold red]Error loading packages: {e}[/bold red]")
+            result = self._result("installed")
+            table = self.query_one("#installed-table", PackageTable)
+            if not self._installed_loaded:
+                result.update("[yellow]Loading installed packages…[/yellow]")
+            try:
+                pkgs = await asyncio.to_thread(self._ps.list_installed)
+                if not self.is_mounted:
+                    return
+                self._installed_pkgs = list(pkgs)
+                self._installed_set = {(p.name, p.manager) for p in self._installed_pkgs}
+                self._installed_loaded = True
+                self._installed_loaded_at = time.monotonic()
+                self._show_installed(PackageCollection(self._installed_pkgs))
+                result.update(f"[green]Loaded {pkgs.total} installed packages[/green]")
+                await self._rebuild_installed_tabs()
+                if self._active_section == "installed":
+                    table._table.focus()
+                if self._search_query:
+                    self._track(self._do_search(self._search_query, self._search_managers))
+            except Exception as e:
+                logger.exception("list_installed failed")
+                if self.is_mounted:
+                    result.update(f"[bold red]Error loading packages: {e}[/bold red]")
+        finally:
+            self._installed_busy = False
 
     async def _rebuild_installed_tabs(self):
         tabs = self.query_one("#installed-filter-tabs", Tabs)
@@ -496,8 +541,11 @@ class StoreScreen(Screen):
             self._track(self._load_local())
             self.query_one("#local-table")._table.focus()
         elif section == "about":
+            self._track(self._load_stats())
             self.query_one("#package-table")._table.focus()
         else:
+            if not self._installed_loaded or time.monotonic() - self._installed_loaded_at > 15:
+                self._track(self._do_load_installed())
             self.query_one("#installed-table")._table.focus()
 
     # ---------- keyboard actions ----------
