@@ -59,10 +59,17 @@ rmadd/
 style.tcss                   Textual CSS stylesheet.
 ```
 
+## Download
+
+```bash
+curl -L https://github.com/Nawras448/rmadd/archive/refs/heads/main.tar.gz | tar -xz
+
+```
+
 ## Usage
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt # 3. Setting the requirements
 python main.py                  # TUI (default)
 
 # CLI mode
