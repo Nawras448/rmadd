@@ -65,7 +65,7 @@ class StoreScreen(Screen):
     def compose(self):
         yield Header(show_clock=True)
         with Horizontal(id="store-topbar"):
-            yield Static("rmadd — App Store", id="store-title")
+            yield Static("rmadd v0.1.0", id="store-title")
         with TabbedContent(initial="pane-search", id="store-tabs"):
             with TabPane("Download Tools", id="pane-tools") as pane_tools:
                 pane_tools.border_title = "Tools"
@@ -138,8 +138,9 @@ class StoreScreen(Screen):
 
             with TabPane("About / Stats", id="pane-about") as pane_about:
                 pane_about.border_title = "About"
-                yield SystemCard(id="system-card")
-                yield PackageTable(id="package-table")
+                with VerticalScroll(id="pane-scroll-about"):
+                    yield SystemCard(id="system-card")
+                    yield PackageTable(id="package-table")
         yield Footer()
 
     # ---------- helpers ----------

@@ -201,7 +201,8 @@ DataTable:ansi > .datatable--header {
     border-title-color: $secondary;
     padding: 1;
     margin: 1;
-    height: 1fr;
+    height: auto;
+    min-height: 10;
     background: $surface;
 }
 

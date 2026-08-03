@@ -46,7 +46,7 @@ CYBERPUNK_THEME = Theme(
 
 
 class RmaddTuiApp(App):
-    TITLE = "rmadd"
+    TITLE = "rmadd v0.1.0"
     SUB_TITLE = "Package & System Monitor"
 
     CSS_PATH = _CSS
