@@ -66,6 +66,11 @@ class RmaddTuiApp(App):
         self.package_service = container.get_package_service()
         self.hardware_service = container.get_hardware_service()
 
+    def bell(self) -> None:
+        """Silence all framework bells (CSS errors, restricted input, fatal errors)."""
+
+
+
     def on_mount(self):
         self.push_screen(DashboardScreen(self.system_service, self.package_service, self.hardware_service))
 

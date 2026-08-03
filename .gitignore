@@ -1,2 +1,14 @@
 /user.py
 /vlc.py
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+
+# Probe artifacts
+*.hwm
+*.pwd
+*.pwi
+tmp/

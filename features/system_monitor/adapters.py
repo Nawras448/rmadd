@@ -53,8 +53,9 @@ class _CpuReader:
         for path in ["/sys/class/thermal/thermal_zone0/temp", "/sys/class/hwmon/hwmon0/temp1_input",
                      "/sys/class/thermal/thermal_zone1/temp"]:
             try:
-                return int(open(path).read().strip()) / 1000.0
-            except (FileNotFoundError, PermissionError, ValueError):
+                with open(path) as f:
+                    return int(f.read().strip()) / 1000.0
+            except (FileNotFoundError, PermissionError, ValueError, OSError):
                 continue
         return None
 
@@ -177,13 +178,16 @@ class _NetworkReader:
                 rx_file = f"/sys/class/net/{iface}/statistics/rx_bytes"
                 tx_file = f"/sys/class/net/{iface}/statistics/tx_bytes"
                 try:
-                    net.mac_address = open(mac_file).read().strip()
-                except Exception:
+                    with open(mac_file) as f:
+                        net.mac_address = f.read().strip()
+                except (FileNotFoundError, PermissionError):
                     pass
                 try:
-                    net.rx_bytes = int(open(rx_file).read().strip())
-                    net.tx_bytes = int(open(tx_file).read().strip())
-                except Exception:
+                    with open(rx_file) as f:
+                        net.rx_bytes = int(f.read().strip())
+                    with open(tx_file) as f:
+                        net.tx_bytes = int(f.read().strip())
+                except (FileNotFoundError, PermissionError, ValueError):
                     pass
                 nets.append(net)
         except FileNotFoundError:

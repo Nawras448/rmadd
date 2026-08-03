@@ -3,6 +3,15 @@ import subprocess
 from features.system_info.ports import SystemDataSource
 from features.system_info.domain import Distribution
 
+_RUN_TIMEOUT = 5
+
+
+def _run_cmd(cmd: list) -> str:
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=_RUN_TIMEOUT).stdout.strip()
+    except Exception:
+        return "Unknown"
+
 
 def _read_uptime() -> str:
     try:
@@ -27,35 +36,20 @@ def _read_uptime() -> str:
 
 class HostnamectlAdapter(SystemDataSource):
     def get_hostname(self) -> str:
-        try:
-            return subprocess.run(["hostname"], capture_output=True, text=True).stdout.strip()
-        except Exception:
-            return "Unknown"
+        return _run_cmd(["hostname"])
 
     def get_os_release(self) -> str:
-        try:
-            out = subprocess.run(["lsb_release", "-d"], capture_output=True, text=True).stdout.strip()
-            return out.split(":", 1)[-1].strip() if ":" in out else out
-        except Exception:
-            return "Unknown"
+        out = _run_cmd(["lsb_release", "-d"])
+        return out.split(":", 1)[-1].strip() if ":" in out else out
 
     def get_kernel(self) -> str:
-        try:
-            return subprocess.run(["uname", "-r"], capture_output=True, text=True).stdout.strip()
-        except Exception:
-            return "Unknown"
+        return _run_cmd(["uname", "-r"])
 
     def get_architecture(self) -> str:
-        try:
-            return subprocess.run(["uname", "-m"], capture_output=True, text=True).stdout.strip()
-        except Exception:
-            return "Unknown"
+        return _run_cmd(["uname", "-m"])
 
     def get_hostnamectl(self) -> str:
-        try:
-            return subprocess.run(["hostnamectl"], capture_output=True, text=True).stdout.strip()
-        except Exception:
-            return ""
+        return _run_cmd(["hostnamectl"])
 
     def get_uptime(self) -> str:
         return _read_uptime()
@@ -63,7 +57,9 @@ class HostnamectlAdapter(SystemDataSource):
     def get_distribution(self) -> Distribution:
         d = Distribution()
         try:
-            out = subprocess.run(["lsb_release", "-a"], capture_output=True, text=True).stdout
+            out = subprocess.run(
+                ["lsb_release", "-a"], capture_output=True, text=True, timeout=_RUN_TIMEOUT
+            ).stdout
             for line in out.strip().split("\n"):
                 if "Distributor ID" in line:
                     d.id = line.split(":", 1)[-1].strip()
@@ -80,10 +76,7 @@ class HostnamectlAdapter(SystemDataSource):
 
 class LsbReleaseAdapter(SystemDataSource):
     def _run(self, cmd: list) -> str:
-        try:
-            return subprocess.run(cmd, capture_output=True, text=True).stdout.strip()
-        except Exception:
-            return "Unknown"
+        return _run_cmd(cmd)
 
     def get_hostname(self) -> str:
         return self._run(["hostname"])

@@ -70,20 +70,34 @@ def _family_rank(manager: PackageManager, families: list) -> int:
     return 0 if any(f in meta(manager).families for f in families) else 1
 
 
-def discover_managers(families: Optional[list] = None) -> list:
+def discover_managers(families: Optional[list] = None, *, include_local: bool = False) -> list:
     """Discover available package managers in strict priority order.
 
     Returns a list of (PackageManager, adapter instance) ordered by:
     tier (Native first, then Universal, then Ecosystem), then host-family
     match for natives, then registry order.
+
+    ``PackageManager.LOCAL`` (the PATH binary scanner) is excluded by
+    default: probing arbitrary PATH executables is slow and has side
+    effects. Use ``discover_local_scanner`` explicitly for the opt-in
+    "Local binaries" view instead.
     """
     if families is None:
         families = distro_family()
-    found = [mgr for mgr in PackageManager if is_available(mgr)]
+    found = [
+        mgr for mgr in PackageManager
+        if (include_local or mgr != PackageManager.LOCAL) and is_available(mgr)
+    ]
     found.sort(
         key=lambda mgr: (TIER_ORDER[tier(mgr)], _family_rank(mgr, families), mgr.value)
     )
     return [(mgr, ADAPTER_FACTORIES[mgr]()) for mgr in found]
+
+
+def discover_local_scanner() -> "LocalBinaryAdapter":
+    """Build the (hardened) LOCAL binary adapter for the opt-in view."""
+    from features.package_store.binary_scanner import LocalBinaryAdapter
+    return LocalBinaryAdapter()
 
 
 def resolve_system_manager(families: Optional[list] = None) -> Optional[PackageManager]:

@@ -1,5 +1,4 @@
 import logging
-import sys
 from pathlib import Path
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
@@ -12,7 +11,7 @@ def setup_logging(level: str = "INFO") -> None:
     logging.basicConfig(
         level=getattr(logging, level.upper(), logging.INFO),
         format=LOG_FORMAT,
-        handlers=[logging.FileHandler(str(log_file)), logging.StreamHandler(sys.stderr)],
+        handlers=[logging.FileHandler(str(log_file))],
     )
 
 

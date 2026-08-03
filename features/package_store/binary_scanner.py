@@ -18,17 +18,26 @@ from features.package_store.domain import Package, PackageManager, PackageStatus
 
 PRIORITY_DIRS = ("~/.local/bin", "~/bin", "/usr/local/bin")
 FALLBACK_VERSION = "Standalone Binary"
-MAX_PROBE_WORKERS = 8
+MAX_PROBE_WORKERS = 4
+DEFAULT_PROBE_LIMIT = 64
 
 
 class LocalBinaryScanner:
-    """Collects and describes standalone executables in PATH-like dirs."""
+    """Collects and describes standalone executables in PATH-like dirs.
 
-    def __init__(self, search_dirs=None, extra_path=None, version_timeout=2, probe_limit=256):
+    Only the user-level bin directories are scanned by default; the full
+    system ``$PATH`` is scanned only when ``scan_path=True``. Probing runs
+    executables with ``--version``/``-v``, which can have side effects, so
+    it is kept opt-in and bounded.
+    """
+
+    def __init__(self, search_dirs=None, extra_path=None, version_timeout=2,
+                 probe_limit=DEFAULT_PROBE_LIMIT, scan_path=False):
         self._priority_dirs = [os.path.expanduser(d) for d in (search_dirs or PRIORITY_DIRS)]
         self._extra_path = extra_path
         self._version_timeout = version_timeout
         self._probe_limit = probe_limit
+        self._scan_path = scan_path
         self._version_cache: dict[str, tuple[int, str]] = {}
         self._lock = threading.Lock()
 
@@ -40,6 +49,8 @@ class LocalBinaryScanner:
             if r not in seen:
                 seen.add(r)
                 dirs.append(d)
+        if not self._scan_path:
+            return dirs
         if self._extra_path is not None:
             path_entries = self._extra_path
         else:
@@ -139,6 +150,8 @@ class LocalBinaryScanner:
                     capture_output=True,
                     text=True,
                     timeout=self._version_timeout,
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True,
                 )
             except Exception:
                 continue
@@ -157,9 +170,10 @@ class LocalBinaryScanner:
 class LocalBinaryAdapter(BasePackageManager):
     """File-based source: standalone executables found on PATH-like dirs."""
 
-    def __init__(self, search_dirs=None, extra_path=None, version_timeout=2, probe_limit=256):
+    def __init__(self, search_dirs=None, extra_path=None, version_timeout=2,
+                 probe_limit=DEFAULT_PROBE_LIMIT, scan_path=False):
         super().__init__(PackageManager.LOCAL)
-        self._scanner = LocalBinaryScanner(search_dirs, extra_path, version_timeout, probe_limit)
+        self._scanner = LocalBinaryScanner(search_dirs, extra_path, version_timeout, probe_limit, scan_path)
 
     def list_installed(self) -> list:
         return self._scanner.list_packages()

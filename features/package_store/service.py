@@ -1,6 +1,7 @@
 import os
 import time
 import concurrent.futures
+from dataclasses import replace
 from threading import Event
 from typing import Callable, Optional
 
@@ -20,11 +21,15 @@ class PackageManagerService(GetPackagesUseCase, InstallPackageUseCase):
     SEARCH_TTL = 60
     SEARCH_LIMIT = 50
     COUNTS_TTL = 60
+    MAX_POOL_WORKERS = 8
 
     def __init__(self, sources: dict[PackageManager, BasePackageManager]):
         self._sources = sources
         self._search_cache: dict[tuple, tuple[float, PackageCollection]] = {}
         self._counts_cache: tuple[float, dict] | None = None
+        self._pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=max(1, min(self.MAX_POOL_WORKERS, len(sources)))
+        )
 
     @property
     def available_managers(self) -> list:
@@ -40,21 +45,24 @@ class PackageManagerService(GetPackagesUseCase, InstallPackageUseCase):
     def _source(self, manager: PackageManager) -> BasePackageManager:
         return self._sources[manager]
 
+    def _fresh(self, collection: PackageCollection) -> PackageCollection:
+        """Return detached copies so callers may mutate results freely."""
+        return PackageCollection([replace(p) for p in collection])
+
     def list_installed(self, manager: PackageManager | None = None) -> PackageCollection:
         if manager:
             pkgs = self._source(manager).list_installed()
             return PackageCollection(pkgs)
         results = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(self._sources))) as ex:
-            futures = {ex.submit(self._source(mgr).list_installed): mgr for mgr in self._sources}
-            for fut in concurrent.futures.as_completed(futures):
-                mgr = futures[fut]
-                try:
-                    for p in fut.result():
-                        p.manager = mgr
-                        results.append(p)
-                except Exception:
-                    continue
+        futures = {self._pool.submit(self._source(mgr).list_installed): mgr for mgr in self._sources}
+        for fut in concurrent.futures.as_completed(futures):
+            mgr = futures[fut]
+            try:
+                for p in fut.result():
+                    p.manager = mgr
+                    results.append(p)
+            except Exception:
+                continue
         registered = {p.name for p in results if p.manager != PackageManager.LOCAL}
         results = [
             p for p in results
@@ -66,13 +74,13 @@ class PackageManagerService(GetPackagesUseCase, InstallPackageUseCase):
         key = (query.strip(), manager.value if manager else None)
         hit = self._search_cache.get(key)
         if hit and time.monotonic() - hit[0] < self.SEARCH_TTL:
-            return hit[1]
+            return self._fresh(hit[1])
         if manager:
             collection = PackageCollection(self._source(manager).search(query)[:self.SEARCH_LIMIT])
         else:
             collection = self._search_all(query)
         self._search_cache[key] = (time.monotonic(), collection)
-        return collection
+        return self._fresh(collection)
 
     def _search_all(self, query: str) -> PackageCollection:
         managers = [m for m in self._sources if supports(m, "search")]
@@ -80,16 +88,15 @@ class PackageManagerService(GetPackagesUseCase, InstallPackageUseCase):
 
     def _search_managers(self, query: str, managers: list) -> PackageCollection:
         results = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(managers))) as ex:
-            futures = {ex.submit(self._source(mgr).search, query): mgr for mgr in managers}
-            for fut in concurrent.futures.as_completed(futures):
-                mgr = futures[fut]
-                try:
-                    for p in fut.result()[:self.SEARCH_LIMIT]:
-                        p.manager = mgr
-                        results.append(p)
-                except Exception:
-                    continue
+        futures = {self._pool.submit(self._source(mgr).search, query): mgr for mgr in managers}
+        for fut in concurrent.futures.as_completed(futures):
+            mgr = futures[fut]
+            try:
+                for p in fut.result()[:self.SEARCH_LIMIT]:
+                    p.manager = mgr
+                    results.append(p)
+            except Exception:
+                continue
         return PackageCollection(results).sorted_by_tier()
 
     def get_package_detail(self, name: str, manager: PackageManager) -> Package | None:
@@ -109,16 +116,15 @@ class PackageManagerService(GetPackagesUseCase, InstallPackageUseCase):
         if self._counts_cache and now - self._counts_cache[0] < self.COUNTS_TTL:
             return dict(self._counts_cache[1])
         result = {}
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(self._sources))) as ex:
-            futures = {ex.submit(self._source(mgr).count): mgr for mgr in self._sources}
-            for fut in concurrent.futures.as_completed(futures):
-                mgr = futures[fut]
-                try:
-                    count = fut.result()
-                    if count and count > 0:
-                        result[mgr] = count
-                except Exception:
-                    continue
+        futures = {self._pool.submit(self._source(mgr).count): mgr for mgr in self._sources}
+        for fut in concurrent.futures.as_completed(futures):
+            mgr = futures[fut]
+            try:
+                count = fut.result()
+                if count and count > 0:
+                    result[mgr] = count
+            except Exception:
+                continue
         ordered = {mgr.value: str(result[mgr]) for mgr in self._sources if mgr in result}
         self._counts_cache = (now, ordered)
         return dict(ordered)

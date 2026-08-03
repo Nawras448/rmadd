@@ -33,6 +33,10 @@ class StoreScreen(Screen):
         self._search_gen = 0
         self._search_query = ""
         self._debounce_task: asyncio.Task | None = None
+        self._filter_task: asyncio.Task | None = None
+        self._tasks: list[asyncio.Task] = []
+        self._local_adapter = None
+        self._local_pkgs: list[Package] = []
 
     BINDINGS = [
         ("escape", "dismiss", "Back"),
@@ -43,6 +47,7 @@ class StoreScreen(Screen):
         ("f1", "tab_tools", "Tools"),
         ("f2", "tab_search", "Search"),
         ("f3", "tab_installed", "Installed"),
+        ("f4", "tab_local", "Local Binaries"),
     ]
 
     def compose(self):
@@ -99,6 +104,16 @@ class StoreScreen(Screen):
                         yield Button("Details", id="btn-installed-details", variant="default")
                     with VerticalScroll(id="installed-result-scroll", classes="result-scroll"):
                         yield Static(id="installed-result")
+
+            with TabPane("Local Binaries", id="pane-local") as pane_local:
+                pane_local.border_title = "Local Binaries"
+                with VerticalScroll(id="pane-scroll-local"):
+                    yield PackageTable(id="local-table")
+                    with Horizontal(id="local-action-bar"):
+                        yield Static(id="local-sel", classes="sel-label")
+                        yield Button("Remove", id="btn-local-remove", variant="error")
+                    with VerticalScroll(id="local-result-scroll", classes="result-scroll"):
+                        yield Static(id="local-result")
         yield Footer()
 
     # ---------- helpers ----------
@@ -108,6 +123,8 @@ class StoreScreen(Screen):
             return self.query_one("#search-table", PackageTable)
         if section == "installed":
             return self.query_one("#installed-table", PackageTable)
+        if section == "local":
+            return self.query_one("#local-table", PackageTable)
         return self.query_one("#tools-table", ToolsTable)
 
     def _get_cursor_row(self, section: str) -> tuple:
@@ -129,7 +146,12 @@ class StoreScreen(Screen):
                 pass
 
     def _result(self, section: str) -> Static:
-        ids = {"tools": "#tools-result", "search": "#search-result", "installed": "#installed-result"}
+        ids = {
+            "tools": "#tools-result",
+            "search": "#search-result",
+            "installed": "#installed-result",
+            "local": "#local-result",
+        }
         return self.query_one(ids[section], Static)
 
     # ---------- data loading ----------
@@ -140,24 +162,38 @@ class StoreScreen(Screen):
         self._update_tools_actions()
         self._update_search_actions()
         self._update_installed_actions()
-        asyncio.create_task(self._do_load_installed())
+        self._track(self._do_load_installed())
+
+    def _track(self, coro) -> asyncio.Task:
+        task = asyncio.create_task(coro)
+        self._tasks.append(task)
+        return task
 
     def on_unmount(self):
+        for task in self._tasks:
+            if not task.done():
+                task.cancel()
         if self._debounce_task and not self._debounce_task.done():
             self._debounce_task.cancel()
+        if self._filter_task and not self._filter_task.done():
+            self._filter_task.cancel()
 
     def on_resize(self, event):
-        for section in ("tools", "search", "installed"):
+        for section in ("tools", "search", "installed", "local"):
             try:
                 apply_pane_floor(self._table_for(section))
             except Exception:
                 pass
 
     async def _do_load_installed(self):
+        if not self.is_mounted:
+            return
         result = self._result("installed")
         table = self.query_one("#installed-table", PackageTable)
         try:
             pkgs = await asyncio.to_thread(self._ps.list_installed)
+            if not self.is_mounted:
+                return
             self._installed_pkgs = list(pkgs)
             self._installed_set = {(p.name, p.manager) for p in self._installed_pkgs}
             self._show_installed(PackageCollection(self._installed_pkgs))
@@ -166,9 +202,10 @@ class StoreScreen(Screen):
             if self._active_section == "installed":
                 table._table.focus()
             if self._search_query:
-                asyncio.create_task(self._do_search(self._search_query, self._search_managers))
+                self._track(self._do_search(self._search_query, self._search_managers))
         except Exception as e:
-            result.update(f"[bold red]Error loading packages: {e}[/bold red]")
+            if self.is_mounted:
+                result.update(f"[bold red]Error loading packages: {e}[/bold red]")
 
     async def _rebuild_installed_tabs(self):
         tabs = self.query_one("#installed-filter-tabs", Tabs)
@@ -212,7 +249,54 @@ class StoreScreen(Screen):
             collection = collection.search(q)
         self._show_installed(collection)
 
+    def _schedule_filter(self, query: str):
+        if self._filter_task and not self._filter_task.done():
+            self._filter_task.cancel()
+        self._filter_task = asyncio.create_task(self._delayed_filter(query))
+
+    async def _delayed_filter(self, query: str):
+        try:
+            await asyncio.sleep(0.15)
+        except asyncio.CancelledError:
+            return
+        if not self.is_mounted:
+            return
+        self._filter_installed(query)
+
+    def _show_local(self, collection: PackageCollection):
+        table = self.query_one("#local-table", PackageTable)
+        table.show_packages(collection)
+        self._move_cursor_first_row(table)
+        self._update_local_actions()
+
+    async def _load_local(self, force: bool = False):
+        if not self.is_mounted:
+            return
+        result = self._result("local")
+        if self._local_adapter is None:
+            from features.package_store.registry import discover_local_scanner
+            self._local_adapter = discover_local_scanner()
+        if not force and self._local_pkgs:
+            self._show_local(PackageCollection(self._local_pkgs))
+            return
+        try:
+            result.update("[cyan]Scanning local binaries...[/cyan]")
+            pkgs = await asyncio.to_thread(self._local_adapter.list_installed)
+            if not self.is_mounted:
+                return
+            self._local_pkgs = list(pkgs)
+            self._show_local(PackageCollection(self._local_pkgs))
+            if pkgs:
+                result.update(f"[green]Found {len(pkgs)} local binaries[/green]")
+            else:
+                result.update("[yellow]No local binaries found[/yellow]")
+        except Exception as e:
+            if self.is_mounted:
+                result.update(f"[bold red]Error scanning local binaries: {e}[/bold red]")
+
     async def _do_search(self, query: str, managers=None):
+        if not self.is_mounted:
+            return
         result = self._result("search")
         table = self.query_one("#search-table", PackageTable)
         q = query.strip()
@@ -290,11 +374,11 @@ class StoreScreen(Screen):
         if event.input.id == "search-input":
             if self._debounce_task and not self._debounce_task.done():
                 self._debounce_task.cancel()
-            asyncio.create_task(self._do_search(event.value, self._search_managers))
+            self._track(self._do_search(event.value, self._search_managers))
 
     def on_input_changed(self, event: Input.Changed):
         if event.input.id == "installed-input":
-            self._filter_installed(event.value)
+            self._schedule_filter(event.value)
         elif event.input.id == "search-input":
             self._schedule_live_search(event.value)
 
@@ -304,6 +388,8 @@ class StoreScreen(Screen):
             self._update_search_actions()
         elif parent_id == "installed-table":
             self._update_installed_actions()
+        elif parent_id == "local-table":
+            self._update_local_actions()
         elif parent_id == "tools-table":
             self._update_tools_actions()
 
@@ -312,6 +398,7 @@ class StoreScreen(Screen):
             "search-table": "search",
             "installed-table": "installed",
             "tools-table": "tools",
+            "local-table": "local",
         }.get(event.data_table.parent.id, "installed")
         self._active_section = section
         self._open_detail(section)
@@ -330,7 +417,7 @@ class StoreScreen(Screen):
                 self._search_managers = {PackageManager(event.tab.id.removeprefix("tab-"))}
             if self._debounce_task and not self._debounce_task.done():
                 self._debounce_task.cancel()
-            asyncio.create_task(
+            self._track(
                 self._do_search(self.query_one("#search-input", Input).value, self._search_managers)
             )
 
@@ -339,21 +426,23 @@ class StoreScreen(Screen):
         if bid == "btn-store-back":
             self.dismiss()
         elif bid == "btn-tools-install":
-            asyncio.create_task(self._do_tool_action("install"))
+            self._track(self._do_tool_action("install"))
         elif bid == "btn-tools-update":
-            asyncio.create_task(self._do_tool_action("update"))
+            self._track(self._do_tool_action("update"))
         elif bid == "btn-tools-appimage":
             self._open_appimage_install()
         elif bid == "btn-search-install":
-            asyncio.create_task(self._do_pkg_action("install", "search"))
+            self._track(self._do_pkg_action("install", "search"))
         elif bid == "btn-search-details":
             self._open_detail("search")
         elif bid == "btn-installed-remove":
-            asyncio.create_task(self._do_pkg_action("remove", "installed"))
+            self._track(self._do_pkg_action("remove", "installed"))
         elif bid == "btn-installed-update":
-            asyncio.create_task(self._do_pkg_action("update", "installed"))
+            self._track(self._do_pkg_action("update", "installed"))
         elif bid == "btn-installed-details":
             self._open_detail("installed")
+        elif bid == "btn-local-remove":
+            self._track(self._do_pkg_action("remove", "local"))
 
     def on_tabbed_content_tab_activated(self, event: TabbedContent.TabActivated):
         section = event.pane.id.removeprefix("pane-")
@@ -369,6 +458,9 @@ class StoreScreen(Screen):
             self.query_one("#tools-table")._table.focus()
         elif section == "search":
             self.query_one("#search-input").focus()
+        elif section == "local":
+            self._track(self._load_local())
+            self.query_one("#local-table")._table.focus()
         else:
             self.query_one("#installed-table")._table.focus()
 
@@ -382,6 +474,9 @@ class StoreScreen(Screen):
 
     def action_tab_installed(self):
         self.query_one(TabbedContent).active = "pane-installed"
+
+    def action_tab_local(self):
+        self.query_one(TabbedContent).active = "pane-local"
 
     def action_select(self):
         self._open_detail(self._active_section)
@@ -397,6 +492,8 @@ class StoreScreen(Screen):
     async def action_quick_remove(self):
         if self._active_section == "installed":
             await self._do_pkg_action("remove", "installed")
+        elif self._active_section == "local":
+            await self._do_pkg_action("remove", "local")
 
     async def action_quick_update(self):
         if self._active_section == "tools":
@@ -405,7 +502,7 @@ class StoreScreen(Screen):
             await self._do_pkg_action("update", "installed")
 
     def _open_detail(self, section: str):
-        asyncio.create_task(self._do_open_detail(section))
+        self._track(self._do_open_detail(section))
 
     def _open_appimage_install(self):
         self.app.push_screen(
@@ -419,12 +516,14 @@ class StoreScreen(Screen):
         result = self._result("tools")
         if ok:
             result.update(f"[bold green]✓ AppImage installed: {name}[/bold green]")
-            asyncio.create_task(self._do_load_installed())
+            self._track(self._do_load_installed())
         else:
             result.update(f"[bold red]✗ AppImage install failed: {name}[/bold red]")
         self._auto_scroll_result("tools")
 
     async def _do_open_detail(self, section: str):
+        if not self.is_mounted:
+            return
         name, mgr_str = self._get_cursor_row(section)
         if not name or not mgr_str:
             return
@@ -465,6 +564,8 @@ class StoreScreen(Screen):
             self._tools = detect_tools()
             self.query_one("#tools-table", ToolsTable).show_tools(self._tools)
             self._update_tools_actions()
+        elif section == "local" and ok and action == "remove":
+            self._track(self._load_local(force=True))
 
     async def _do_pkg_action(self, action: str, section: str):
         name, mgr_str = self._get_cursor_row(section)
@@ -487,13 +588,13 @@ class StoreScreen(Screen):
             self._installed_set.add((name, mgr))
             self._installed_pkgs.append(Package(name=name, manager=mgr))
         self._refresh_installed_view()
-        asyncio.create_task(self._rebuild_installed_tabs())
+        self._track(self._rebuild_installed_tabs())
 
     def _mark_removed(self, name, mgr):
         self._installed_set.discard((name, mgr))
         self._installed_pkgs = [p for p in self._installed_pkgs if not (p.name == name and p.manager == mgr)]
         self._refresh_installed_view()
-        asyncio.create_task(self._rebuild_installed_tabs())
+        self._track(self._rebuild_installed_tabs())
 
     def _refresh_installed_view(self):
         query = self.query_one("#installed-input", Input).value
@@ -537,3 +638,14 @@ class StoreScreen(Screen):
         self.query_one("#btn-tools-install", Button).disabled = name in installed_names
         self.query_one("#btn-tools-update", Button).disabled = name not in installed_names
         apply_pane_floor(self._table_for("tools"))
+
+    def _update_local_actions(self):
+        name, _mgr_str = self._get_cursor_row("local")
+        bar = self.query_one("#local-action-bar", Horizontal)
+        label = self.query_one("#local-sel", Static)
+        if name:
+            bar.display = True
+            label.update(f"[bold]{name}[/bold]")
+        else:
+            bar.display = False
+        apply_pane_floor(self._table_for("local"))

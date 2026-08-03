@@ -53,14 +53,15 @@ class PackageTable(Vertical):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.border_title = "Packages"
+        self._row_keys: list[str] = []
+        self._row_cells: dict[str, list] = {}
 
     def compose(self):
         self._table = DataTable(id="inner-table", cursor_type="row", show_cursor=True, show_row_labels=False)
         yield self._table
 
-    def show_packages(self, collection: PackageCollection):
-        self._table.clear(columns=True)
-        self._add_package_columns()
+    def _wanted_rows(self, collection: PackageCollection) -> list:
+        wanted = []
         seen = set()
         for pkg in sorted(collection, key=_sort_key):
             key = f"{pkg.name}|{pkg.manager.value}"
@@ -68,10 +69,40 @@ class PackageTable(Vertical):
                 continue
             seen.add(key)
             status_char = "✓" if pkg.status == PackageStatus.INSTALLED else "○"
-            self._table.add_row(
-                status_char, pkg.name, pkg.version or "—", pkg.arch or "—", tier_tag(pkg.manager),
-                key=key
+            wanted.append(
+                [key, [status_char, pkg.name, pkg.version or "—", pkg.arch or "—", tier_tag(pkg.manager)]]
             )
+        return wanted
+
+    def show_packages(self, collection: PackageCollection):
+        if len(self._table.columns) != 5:
+            self._table.clear(columns=True)
+            self._add_package_columns()
+            self._row_keys = []
+            self._row_cells = {}
+        wanted = self._wanted_rows(collection)
+        wanted_keys = [w[0] for w in wanted]
+        if wanted_keys == self._row_keys:
+            for key, cells in wanted:
+                stored = self._row_cells.get(key)
+                if stored and stored != cells:
+                    try:
+                        row_index = self._table.get_row_index(key)
+                        for col, value in enumerate(cells):
+                            self._table.update_cell(key, col, value)
+                    except Exception:
+                        pass
+                    self._row_cells[key] = cells
+        elif len(self._table.columns) == 5:
+            self._table.clear()
+            self._row_keys = []
+            self._row_cells = {}
+            for key, cells in wanted:
+                self._table.add_row(*cells, key=key)
+                self._row_keys.append(key)
+                self._row_cells[key] = list(cells)
+        else:
+            return
         self._fit_columns(self._table.size.width)
 
     def on_resize(self, event):
@@ -101,6 +132,8 @@ class PackageTable(Vertical):
 
     def show_counts(self, counts: dict):
         self._table.clear(columns=True)
+        self._row_keys = []
+        self._row_cells = {}
         self._table.add_columns("Manager", "Count")
         ordered = []
         for key, count in counts.items():

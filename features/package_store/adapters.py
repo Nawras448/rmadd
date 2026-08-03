@@ -125,8 +125,10 @@ class BaseAdapter(BasePackageManager):
 
     @staticmethod
     def _drain(proc: subprocess.Popen, on_output, tail: list):
+        strip_c0 = {7: None, 8: None, 27: None}  # \a \b \e
         try:
             for line in proc.stdout:
+                line = line.translate(strip_c0)
                 if tail is not None:
                     tail.append(line)
                     if len(tail) > 20:
