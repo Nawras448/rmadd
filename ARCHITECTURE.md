@@ -1,120 +1,100 @@
-# rmadd — Architecture Guide
+# rmadd - Architecture Guide
 
-## 1. Project Directory Mapping
+## 1. Layout
 
-### Active core (keep — this is the app)
+Everything lives in the `rmadd/` package plus a thin `main.py` entry point.
 
-**Entry point & wiring**
-
-| File | Role |
-|---|---|
-| `main.py` | Entry point; builds `DIContainer`, selects UI mode (tui/gui/cli) via config |
-| `shared/di_container.py` | Manual DI container: sources -> lazy singleton services |
-| `shared/config.py` | JSON config at `~/.config/rmadd/config.json` with defaults |
-| `shared/logging.py` | Logs to `~/.local/share/rmadd/logs/app.log` (file handler only) |
-| `shared/cache.py` | `CachingSystemAdapter` / `CachingHardwareAdapter` TTL decorators |
-| `shared/state.py` | `PackageStateBus` — app-wide pub/sub (the central state bus) |
-
-**Textual TUI layer**
+### Entry point & wiring
 
 | File | Role |
 |---|---|
-| `features/ui_switch/presentation/tui/app.py` | `RmaddTuiApp` — root App, cyberpunk theme, mounts `StoreScreen` |
-| `features/package_store/presentation/store_screen.py` | `StoreScreen` — the single TabbedContent screen (Tools/Search/Installed/Local/About) with all view logic |
-| `features/package_store/presentation/package_table.py` | `PackageTable` widget + `apply_pane_floor()` sizing |
-| `features/package_store/presentation/tools_table.py` | `ToolsTable` widget |
-| `features/package_store/presentation/install_progress_screen.py` | `InstallProgressScreen` modal (progress bar, ETA, cancel, emits bus events) |
-| `features/package_store/presentation/package_detail_screen.py` | `PackageDetailScreen` modal |
-| `features/package_store/presentation/appimage_install_screen.py` | `AppImageInstallScreen` file-picker modal |
-| `features/system_info/presentation/system_card.py` | `SystemCard` widget (About tab) |
-| `style.tcss` | Textual CSS (reached via `CSS_PATH`) |
+| `main.py` | Builds the three services directly (no DI container), dispatches to tui/cli via `config.ui_mode`. |
+| `rmadd/config.py` | JSON config at `~/.config/rmadd/config.json` (`ui.mode`: tui or cli). |
+| `rmadd/logging.py` | Logs to `~/.local/share/rmadd/logs/app.log`. |
+| `rmadd/state.py` | `PackageStateBus` - app-wide pub/sub bus. |
 
-**Core logic**
+### Textual TUI layer
 
 | File | Role |
 |---|---|
-| `features/package_store/domain.py` | `PackageManager` enum (27), `TIER_MAP`, `MANAGER_META`, `Package`, `PackageCollection` |
-| `features/package_store/ports.py` | ABCs: `GetPackagesUseCase`, `InstallPackageUseCase`, `BasePackageManager` |
-| `features/package_store/registry.py` | `discover_managers()` — os-release parsing + binary probing + tier ordering |
-| `features/package_store/adapters.py` | Concrete adapters + `ADAPTER_FACTORIES` map; shared `_run_stream`/privilege handling |
-| `features/package_store/service.py` | `PackageManagerService` — use cases, thread pool, search/count caching |
-| `features/package_store/installer_tools.py` | `INSTALLER_TOOLS` manifest + `detect_tools()` |
-| `features/package_store/binary_scanner.py` | `LocalBinaryAdapter` / `LocalBinaryScanner` opt-in PATH scan |
-| `features/system_info/{ports,domain,service}.py` | System-info ports, `SystemInfo`/`Distribution` dataclasses, `GetSystemInfoService` |
-| `features/system_info/adapters.py` | `HostnamectlAdapter` (used in `main.py`) |
-| `features/system_monitor/{ports,domain,service}.py` | Hardware monitor use cases + dataclasses |
-| `features/system_monitor/adapters.py` | `ProcFsAdapter` (CPU/mem/disk/GPU/network readers) — wired but not rendered in the TUI |
-| `features/ui_switch/presentation/cli/commands.py` | Minimal CLI (`info`, `packages`, `hardware`) |
+| `rmadd/tui.py` | `RmaddTuiApp` - root App, cyberpunk theme, mounts StoreScreen, owns state bus. |
+| `rmadd/screens/store_screen.py` | `StoreScreen` - one TabbedContent screen (Tools/Search/Installed/Local/About). |
+| `rmadd/screens/widgets/package_table.py` | `PackageTable` + `apply_pane_floor()` sizing. |
+| `rmadd/screens/widgets/tools_table.py` | `ToolsTable` widget. |
+| `rmadd/screens/widgets/system_card.py` | `SystemCard` (About tab). |
+| `rmadd/screens/install_progress_screen.py` | `InstallProgressScreen` modal (progress, ETA, cancel, emits bus events). |
+| `rmadd/screens/package_detail_screen.py` | `PackageDetailScreen` modal. |
+| `rmadd/screens/appimage_install_screen.py` | `AppImageInstallScreen` file picker. |
+| `style.tcss` | Textual CSS stylesheet (root). |
 
-### Ghost / dead / temporary files (safe to delete)
+### Core logic
 
-| Path | Why |
+| File | Role |
 |---|---|
-| `--version.hwm`, `--version.pwd`, `--version.pwi`, `-v.hwm`, `-v.pwd`, `-v.pwi` | Zero-byte probe artifacts (from a `--version` invocation writing to these names). Gitignored. |
-| `tmp/0.log` | Empty, gitignored scratch. |
-| `screens/` | Empty except a stale `__pycache__/home_screen.pyc`; the old `home_screen.py` was removed in `fab23e2`. |
-| `tests/` (`unit/integration/e2e`) | Only `__init__.py` stubs; the `__pycache__` in `tests/unit` references a deleted `test_ai_benchmark.py`. |
-| `widgets/` (entire package) + `core/core.py` | Orphaned: nothing reachable from `main.py` imports `widgets.*`. Leftover pre-refactor UI. |
-| `default_mono.wav` | Tracked ~300 KB WAV; `RmaddTuiApp.bell()` is overridden so it is never played. |
+| `rmadd/models.py` | `PackageManager` enum (27), tier metadata, `Package`, `PackageCollection`, `SystemInfo`, hardware dataclasses. |
+| `rmadd/package_managers/base.py` | `BaseAdapter` (shared runner, privilege handling), `discover_managers()`, `resolve_system_manager()`. |
+| `rmadd/package_managers/<mgr>.py` | One module per manager (apt, dnf, flatpak, snap, pip, ...). |
+| `rmadd/package_managers/service.py` | `PackageManagerService` - search/install/counts, thread pool, TTL caches. |
+| `rmadd/package_managers/local.py` | `LocalBinaryScanner` (opt-in PATH scan). |
+| `rmadd/system_info.py` | `SystemDataSource`, `HostnamectlAdapter`, `SystemInfoService`. |
+| `rmadd/hardware.py` | `HardwareDataSource`, `ProcFsAdapter` (CPU/mem/disk/GPU/network), `HardwareMonitorService`. |
+| `rmadd/cache.py` | `CachingSystemAdapter` / `CachingHardwareAdapter` (TTL decorators). |
+| `rmadd/tools.py` | `INSTALLER_TOOLS` + `detect_tools()`. |
+| `rmadd/cli.py` | `CliApp` - info / packages / hardware subcommands. |
 
-Also safe to ignore: all `__pycache__/`, `.pytest_cache/` (already gitignored).
+The old hexagonal `features/` and `shared/` trees (ports, adapters, DI container,
+registry) were removed; all that logic now lives in the flat modules above.
 
-### Dormant / stub (not dead)
-
-| File | Status |
-|---|---|
-| `features/system_monitor/*` | Wired but unrendered: `ProcFsAdapter` is built and cached, `hardware_service` is retrieved — yet no Textual widget displays hardware data. Downgrade candidate, not delete. |
-| `features/ui_switch/presentation/gui/app.py` | Intentional stub ("not yet implemented"). |
-| `features/system_info/adapters.py::LsbReleaseAdapter` | Unused duplicate of `HostnamectlAdapter`. |
-
-## 3. Architecture & Data Flow
-
-**Pattern:** hexagonal / ports & adapters + a shared pub/sub state bus, driven by an event-based Textual app.
+## 2. Data Flow
 
 ```
- main.py
-   │  build_container()
-   ▼
- DIContainer (shared/di_container.py)
-   ├── system_source  = CachingSystemAdapter(HostnamectlAdapter)
-   ├── hardware_source = CachingHardwareAdapter(ProcFsAdapter)        # dormant
-   └── package_sources = discover_managers() -> {PackageManager: adapter}
-        # registry.py reads /etc/os-release, probes binaries, sorts by tier
-        # ADAPTER_FACTORIES maps each PackageManager to a BaseAdapter subclass
-   ▼
- RmaddTuiApp (features/ui_switch/presentation/tui/app.py)
-   │  creates PackageStateBus (shared/state.py)
-   ▼
- StoreScreen (features/package_store/presentation/store_screen.py)
+main.py
+  system_service   = SystemInfoService(CachingSystemAdapter(HostnamectlAdapter()))
+  hardware_service = HardwareMonitorService(CachingHardwareAdapter(ProcFsAdapter()))
+  package_service  = PackageManagerService(dict(discover_managers()))
+  ui_mode == "tui" -> RmaddTuiApp(system, package, hardware).run()
+  ui_mode == "cli" -> CliApp(system, package, hardware).run(sys.argv[1:])
 ```
 
-**Data flows around the loop:**
+1. **Read path (off the UI thread):** StoreScreen calls services via
+   `asyncio.to_thread`. PackageManagerService fans out to a ThreadPoolExecutor,
+   merges results, caches counts and searches.
+2. **Write/op path:** key/button action -> InstallProgressScreen ->
+   `package_service.install/remove/update` -> adapter `_run_stream()` (cancel
+   via threading.Event) -> emits to the bus on completion.
+3. **Refresh path:** `state_bus.emit(kind, name, mgr)` -> StoreScreen
+   `_on_state_event` -> updates installed set, invalidates counts, re-runs
+   search, reloads stats, triggers `_rediscover_managers()`.
+4. **Background:** StoreScreen starts a 5s interval for stats; local scan and
+   live search are lazy/debounced.
 
-1. **Read path (sync, off the UI thread):** `StoreScreen` calls services via `asyncio.to_thread(...)`.
-   - `package_service.list_installed() / search() / get_all_counts()` — `PackageManagerService` fans work out to a `ThreadPoolExecutor` (max 8), runs each adapter, merges results, caches counts (`COUNTS_TTL=60`) and searches (`SEARCH_TTL=60`).
-   - Adapters (`BaseAdapter`) shell out to real CLIs, with privilege escalation via `pkexec -> sudo`.
-2. **Write/op path:** Button/key action -> push `InstallProgressScreen` -> `package_service.install/remove/update` -> adapter `_run_stream()` (streams output, cancel via `threading.Event`) -> on success emits to the bus:
-   ```
-   InstallProgressScreen._finish() -> app.state_bus.emit("install"|"remove"|"update", name, mgr)
-   ```
-3. **Refresh path:** `StoreScreen._on_state_event(kind, name, mgr)` -> `_apply_installed/_apply_removed` -> updates `_installed_set`, invalidates counts, re-runs search, reloads stats, re-triggers `_rediscover_managers()` (which emits `"managers_changed"` -> rebuild tabs).
-4. **Background refresh:** `StoreScreen.on_mount()` starts `set_interval(5.0, _on_stats_tick)`; `_load_local()` scans the PATH lazily; live search is debounced (`0.25s`) and the installed filter (`0.15s`).
+## 3. Gotchas & going forward
 
-**Primary classes/modules by responsibility:**
+- **Reactivity:** the app only renders what the state bus tells it to. Any new
+  modal that changes package state must end with
+  `app.state_bus.emit("install"|"remove"|"update", name, mgr)`.
+- **Adding a manager:** 1) add enum + tier/meta in `rmadd/models.py`;
+  2) add `<manager>.py` in `rmadd/package_managers/` exposing an `Adapter`
+  subclass of `BaseAdapter`; 3) register the module. Register modules discovered
+  automatically via `discover_managers()`.
+- **Debugging:** logs at `~/.local/share/rmadd/logs/app.log`; StoreScreen owns
+  `_track`/`on_unmount` for background tasks; force refresh via `r`.
+- All bindings live in `rmadd/tui.py`.
 
-- **Discovery & adapter lifecycle:** `registry.discover_managers()` / `discover_local_scanner()` / `resolve_system_manager()`; `domain.py` metadata (`MANAGER_META`, `TIER_MAP`, `capabilities`); adapter factories in `adapters.py`; runtime re-discovery via `PackageManagerService.add_source()` + `_rediscover_managers()`.
-- **Tabbed content & reactive state:** `StoreScreen` (owns all `TabbedContent` panes, per-section action bars, tables, `_active_section`, lazy per-tab loading); widgets `PackageTable`, `ToolsTable`, `SystemCard`; state held in screen instance attrs (`_installed_set`, `_search_gen`, ...) with `PackageCollection` as the transform pipeline.
-- **Event dispatch & async:** `PackageStateBus` (subscribe/unsubscribe/emit) in `shared/state.py`; `StoreScreen.on_*` Textual handlers -> `_track()` tasks; install modals run ops on a worker thread + `queue.Queue` drained by a 0.05s `set_interval` timer; task cancellation in `_track`/`on_unmount`.
+## 4. Package state bus
 
----
+`rmadd/state.py` `PackageStateBus` supports subscribe / unsubscribe / emit.
+The contract is `emit(kind, name, mgr)`.
 
-## 4. Navigation Quick Reference
+| kind             | name | mgr            | Emitter                                            |
+|------------------|------|----------------|----------------------------------------------------|
+| install          | pkg  | manager        | InstallProgressScreen on success                   |
+| remove           | pkg  | manager        | InstallProgressScreen on success                   |
+| update           | pkg  | manager        | InstallProgressScreen on success                   |
+| install          | pkg  | APPIMAGE       | StoreScreen (AppImage install path)                |
+| managers_changed | ""   | None           | StoreScreen `_rediscover_managers()`               |
 
-| Goal | Where? |
-|---|---|
-| Tweak UI layout / CSS | `style.tcss` for all styling; `StoreScreen.compose()` (lines ~67-146) owns the tab structure, IDs, action bars, scroll containers. |
-| Add / restyle a widget | Model on `PackageTable` / `ToolsTable` (DataTable subclass pattern + `apply_pane_floor`); hook events in `StoreScreen.on_button_pressed` and the section-specific `_update_*_actions`. |
-| Add a new package manager | 1) add enum + tier + `ManagerMeta` in `domain.py`; 2) add an adapter subclass following `AptAdapter` in `adapters.py`; 3) register it in `ADAPTER_FACTORIES`; 4) it appears automatically via discovery. |
-| Debug background tasks / refresh / state sync | StoreScreen running methods (`_load_stats`, `_do_load_installed`, `_do_search`, `_apply_installed`, `_rediscover_managers`) and the thread pool in `PackageManagerService`; see `install_progress_screen.py` `_run` / `_drain_queue` for the worker-thread UI pump; logs: `~/.local/share/rmadd/logs/app.log`. |
-| Modify the bus contract | `shared/state.py` (`emit(kind, name, mgr)`); subscribers: `StoreScreen._on_state_event`; emitters: `InstallProgressScreen._finish`, `StoreScreen` (AppImage + rediscover). |
-| CLI/GUI modes | `features/ui_switch/presentation/cli/commands.py` and `gui/app.py`. |
+Subscribers: StoreScreen `_on_state_event` (mounted/unmounted with the screen).
+
+This is the only reactive channel the UI uses: modals must end with
+`app.state_bus.emit(action, name, mgr)` or the Installed tab will not reset.
