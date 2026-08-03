@@ -4,7 +4,7 @@ from textual.app import App
 from textual.binding import Binding
 from textual.theme import Theme
 
-from features.system_info.presentation.dashboard_screen import DashboardScreen
+from features.package_store.presentation.store_screen import StoreScreen
 
 _CSS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "style.tcss")
 
@@ -53,7 +53,6 @@ class RmaddTuiApp(App):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("d", "pop_screen", "Dashboard"),
         Binding("r", "refresh", "Refresh"),
     ]
 
@@ -72,8 +71,11 @@ class RmaddTuiApp(App):
 
 
     def on_mount(self):
-        self.push_screen(DashboardScreen(self.system_service, self.package_service, self.hardware_service))
+        self.push_screen(StoreScreen(self.system_service, self.package_service))
 
     def action_refresh(self):
         self.system_service.refresh()
+        screen = self.screen
+        if hasattr(screen, "_refresh_stats"):
+            screen._refresh_stats()
         self.notify("Data refreshed", timeout=3)

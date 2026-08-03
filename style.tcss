@@ -189,7 +189,7 @@ DataTable:ansi > .datatable--header {
     margin: 0 0 0 0;
 }
 
-#pane-scroll-tools, #pane-scroll-search, #pane-scroll-installed {
+#pane-scroll-tools, #pane-scroll-search, #pane-scroll-installed, #pane-scroll-local, #pane-scroll-about {
     height: 1fr;
     width: 100%;
     scrollbar-color: $primary;
@@ -404,8 +404,21 @@ Button:ansi.-style-flat.-warning, Button:ansi.-style-default.-warning {
     background: $background;
 }
 
-#store-topbar Button {
-    margin: 0 1;
+#store-title {
+    text-style: bold;
+    color: $secondary;
+}
+
+#pane-about {
+    padding: 1;
+}
+
+#system-card {
+    border: round $primary;
+    border-title-color: $secondary;
+    padding: 1;
+    margin: 0 0 1 0;
+    background: $surface;
 }
 
 #tools-action-bar, #search-action-bar, #installed-action-bar {

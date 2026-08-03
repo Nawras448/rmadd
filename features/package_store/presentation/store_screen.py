@@ -11,6 +11,7 @@ from features.package_store.presentation.appimage_install_screen import AppImage
 from features.package_store.presentation.package_table import PackageTable, apply_pane_floor
 from features.package_store.presentation.tools_table import ToolsTable
 from features.package_store.installer_tools import detect_tools
+from features.system_info.presentation.system_card import SystemCard
 from features.package_store.domain import (
     PackageManager,
     PackageStatus,
@@ -21,8 +22,9 @@ from features.package_store.domain import (
 
 
 class StoreScreen(Screen):
-    def __init__(self, package_service):
+    def __init__(self, system_service, package_service):
         super().__init__()
+        self._ss = system_service
         self._ps = package_service
         self._search_managers: set[PackageManager] | None = None
         self._installed_managers: set[PackageManager] | None = None
@@ -39,7 +41,6 @@ class StoreScreen(Screen):
         self._local_pkgs: list[Package] = []
 
     BINDINGS = [
-        ("escape", "dismiss", "Back"),
         ("enter", "select", "Details"),
         ("i", "quick_install", "Install"),
         ("r", "quick_remove", "Remove"),
@@ -48,12 +49,13 @@ class StoreScreen(Screen):
         ("f2", "tab_search", "Search"),
         ("f3", "tab_installed", "Installed"),
         ("f4", "tab_local", "Local Binaries"),
+        ("f5", "tab_about", "About"),
     ]
 
     def compose(self):
         yield Header(show_clock=True)
         with Horizontal(id="store-topbar"):
-            yield Button("Back to Dashboard", id="btn-store-back")
+            yield Static("rmadd — App Store", id="store-title")
         with TabbedContent(initial="pane-search", id="store-tabs"):
             with TabPane("Download Tools", id="pane-tools") as pane_tools:
                 pane_tools.border_title = "Tools"
@@ -114,6 +116,11 @@ class StoreScreen(Screen):
                         yield Button("Remove", id="btn-local-remove", variant="error")
                     with VerticalScroll(id="local-result-scroll", classes="result-scroll"):
                         yield Static(id="local-result")
+
+            with TabPane("About / Stats", id="pane-about") as pane_about:
+                pane_about.border_title = "About"
+                yield SystemCard(id="system-card")
+                yield PackageTable(id="package-table")
         yield Footer()
 
     # ---------- helpers ----------
@@ -163,6 +170,7 @@ class StoreScreen(Screen):
         self._update_search_actions()
         self._update_installed_actions()
         self._track(self._do_load_installed())
+        self._track(self._load_stats())
 
     def _track(self, coro) -> asyncio.Task:
         task = asyncio.create_task(coro)
@@ -184,6 +192,31 @@ class StoreScreen(Screen):
                 apply_pane_floor(self._table_for(section))
             except Exception:
                 pass
+
+    async def _load_stats(self):
+        if not self.is_mounted:
+            return
+        card = self.query_one("#system-card", SystemCard)
+        counts_table = self.query_one("#package-table", PackageTable)
+        card.update("[yellow]Loading system info...[/yellow]")
+        counts_table.show_counts({})
+        try:
+            info = await asyncio.to_thread(self._ss.get_system_info)
+            if self.is_mounted:
+                card.display_info(info)
+        except Exception as e:
+            if self.is_mounted:
+                card.update(f"[bold red]Error loading system info: {e}[/bold red]")
+        try:
+            counts = await asyncio.to_thread(self._ps.get_all_counts)
+            if self.is_mounted:
+                counts_table.show_counts(counts)
+        except Exception as e:
+            if self.is_mounted:
+                counts_table.show_counts({"error": str(e)})
+
+    def _refresh_stats(self):
+        self._track(self._load_stats())
 
     async def _do_load_installed(self):
         if not self.is_mounted:
@@ -394,12 +427,15 @@ class StoreScreen(Screen):
             self._update_tools_actions()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected):
+        parent_id = event.data_table.parent.id
+        if parent_id == "package-table":
+            return
         section = {
             "search-table": "search",
             "installed-table": "installed",
             "tools-table": "tools",
             "local-table": "local",
-        }.get(event.data_table.parent.id, "installed")
+        }.get(parent_id, "installed")
         self._active_section = section
         self._open_detail(section)
 
@@ -423,9 +459,7 @@ class StoreScreen(Screen):
 
     def on_button_pressed(self, event: Button.Pressed):
         bid = event.button.id
-        if bid == "btn-store-back":
-            self.dismiss()
-        elif bid == "btn-tools-install":
+        if bid == "btn-tools-install":
             self._track(self._do_tool_action("install"))
         elif bid == "btn-tools-update":
             self._track(self._do_tool_action("update"))
@@ -461,6 +495,8 @@ class StoreScreen(Screen):
         elif section == "local":
             self._track(self._load_local())
             self.query_one("#local-table")._table.focus()
+        elif section == "about":
+            self.query_one("#package-table")._table.focus()
         else:
             self.query_one("#installed-table")._table.focus()
 
@@ -478,10 +514,17 @@ class StoreScreen(Screen):
     def action_tab_local(self):
         self.query_one(TabbedContent).active = "pane-local"
 
+    def action_tab_about(self):
+        self.query_one(TabbedContent).active = "pane-about"
+
     def action_select(self):
+        if self._active_section == "about":
+            return
         self._open_detail(self._active_section)
 
     async def action_quick_install(self):
+        if self._active_section == "about":
+            return
         if self._active_section == "tools":
             await self._do_tool_action("install")
         elif self._active_section == "search":
@@ -490,12 +533,16 @@ class StoreScreen(Screen):
             await self._do_pkg_action("install", "installed")
 
     async def action_quick_remove(self):
+        if self._active_section == "about":
+            return
         if self._active_section == "installed":
             await self._do_pkg_action("remove", "installed")
         elif self._active_section == "local":
             await self._do_pkg_action("remove", "local")
 
     async def action_quick_update(self):
+        if self._active_section == "about":
+            return
         if self._active_section == "tools":
             await self._do_tool_action("update")
         elif self._active_section == "installed":
