@@ -50,66 +50,6 @@ FooterKey:hover > .footer-key--key {
     background: $accent;
 }
 
-/* ---------------- sidebar / navigation ---------------- */
-
-#sidebar {
-    width: 20%;
-    min-width: 26;
-    max-width: 32;
-    height: 100%;
-    background: $surface;
-    border: round $primary;
-    border-title-color: $secondary;
-    border-title-align: center;
-    padding: 1;
-    scrollbar-color: $primary;
-    scrollbar-background: $surface;
-}
-
-#sidebar-title {
-    border-bottom: heavy $primary;
-    text-align: center;
-    text-style: bold;
-    padding: 1;
-    color: $secondary;
-}
-
-#sidebar Button {
-    width: 100%;
-    margin: 0 0 1 0;
-    border: none;
-    border-bottom: dashed $border-blurred;
-    background: transparent;
-    color: $foreground;
-    text-align: left;
-    text-style: none;
-}
-
-#sidebar Button:hover {
-    background: #a855f7 15%;
-    color: #c084fc;
-}
-
-#sidebar Button.-primary {
-    border-bottom: dashed $accent;
-    color: $secondary;
-    text-style: bold;
-    background: transparent;
-}
-
-#sidebar Button.-error {
-    color: #f43f5e;
-    background: transparent;
-}
-
-#content {
-    width: 1fr;
-    height: 100%;
-    padding: 1;
-    scrollbar-color: $primary;
-    scrollbar-background: $surface;
-}
-
 /* ---------------- generic containers ---------------- */
 
 #store-layout, #detail-layout {
