@@ -1185,6 +1185,24 @@ class PipxAdapter(BaseAdapter):
     def count(self) -> int:
         return len(self.list_installed())
 
+    def _do_search(self, query: str) -> list:
+        pkgs = []
+        try:
+            import socket
+            import xmlrpc.client
+            socket.setdefaulttimeout(10)
+            proxy = xmlrpc.client.ServerProxy("https://pypi.org/pypi")
+            for hit in proxy.search({"name": query}, "or")[:20]:
+                pkgs.append(Package(
+                    name=hit.get("name", ""),
+                    version=str(hit.get("latest_version") or ""),
+                    summary=str(hit.get("summary") or ""),
+                    manager=self._manager,
+                ))
+        except Exception:
+            pass
+        return pkgs
+
     def _install_cmd(self, name: str) -> list: return ["pipx", "install", name]
     def _remove_cmd(self, name: str) -> list: return ["pipx", "uninstall", name]
     def _update_cmd(self, name: str) -> list: return ["pipx", "upgrade", name]

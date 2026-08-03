@@ -37,6 +37,7 @@ class InstallProgressScreen(Screen):
         manager: PackageManager,
         on_finish: Optional[Callable[[str, str, PackageManager, bool, bool], None]] = None,
         section: str = "",
+        executor: Optional[Callable] = None,
     ):
         super().__init__()
         self._ps = package_service
@@ -45,6 +46,7 @@ class InstallProgressScreen(Screen):
         self._mgr = manager
         self._on_finish = on_finish
         self._section = section
+        self._executor = executor
         self._cancel_event = threading.Event()
         self._queue: queue.Queue = queue.Queue()
         self._start = time.monotonic()
@@ -79,10 +81,15 @@ class InstallProgressScreen(Screen):
 
     async def _run(self):
         try:
-            method = getattr(self._ps, self._action)
-            ok = await asyncio.to_thread(
-                method, self._name, self._mgr, None, self._queue.put, self._cancel_event
-            )
+            if self._executor is not None:
+                ok = await asyncio.to_thread(
+                    self._executor, self._name, self._mgr, self._queue.put, self._cancel_event
+                )
+            else:
+                method = getattr(self._ps, self._action)
+                ok = await asyncio.to_thread(
+                    method, self._name, self._mgr, None, self._queue.put, self._cancel_event
+                )
             self._finish(ok)
         except Exception as e:
             self._queue.put(f"Error: {e}\n")
@@ -100,6 +107,9 @@ class InstallProgressScreen(Screen):
         bar.update(total=100, progress=100)
         if ok:
             self._queue.put("Done.\n")
+            bus = getattr(self.app, "state_bus", None)
+            if bus is not None and self._action in ("install", "remove", "update"):
+                bus.emit(self._action, self._name, self._mgr)
         elif self._cancel_event.is_set():
             self._queue.put("Operation cancelled.\n")
         else:

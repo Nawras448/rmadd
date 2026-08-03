@@ -49,6 +49,8 @@ class StoreScreen(Screen):
         self._installed_busy = False
         self._installed_loaded = False
         self._installed_loaded_at = 0.0
+        self._rediscovering = False
+        self._rebuild_lock = asyncio.Lock()
 
     BINDINGS = [
         ("enter", "select", "Details"),
@@ -192,6 +194,7 @@ class StoreScreen(Screen):
         self._track(self._do_load_installed())
         self._track(self._load_stats())
         self._stats_interval = self.set_interval(5.0, self._on_stats_tick)
+        self.app.state_bus.subscribe(self._on_state_event)
 
     def _track(self, coro) -> asyncio.Task:
         self._tasks = [t for t in self._tasks if not t.done()]
@@ -209,6 +212,7 @@ class StoreScreen(Screen):
             self._filter_task.cancel()
         if self._stats_interval is not None:
             self._stats_interval.stop()
+        self.app.state_bus.unsubscribe(self._on_state_event)
 
     def on_resize(self, event):
         for section in ("tools", "search", "installed", "local"):
@@ -255,7 +259,7 @@ class StoreScreen(Screen):
     def _refresh_stats(self):
         self._track(self._load_stats())
 
-    async def _do_load_installed(self):
+    async def _do_load_installed(self, force: bool = False):
         if not self.is_mounted or self._installed_busy:
             return
         self._installed_busy = True
@@ -273,7 +277,8 @@ class StoreScreen(Screen):
                 self._installed_loaded = True
                 self._installed_loaded_at = time.monotonic()
                 self._show_installed(PackageCollection(self._installed_pkgs))
-                result.update(f"[green]Loaded {pkgs.total} installed packages[/green]")
+                if not force:
+                    result.update(f"[green]Loaded {pkgs.total} installed packages[/green]")
                 await self._rebuild_installed_tabs()
                 if self._active_section == "installed":
                     table._table.focus()
@@ -287,29 +292,76 @@ class StoreScreen(Screen):
             self._installed_busy = False
 
     async def _rebuild_installed_tabs(self):
-        tabs = self.query_one("#installed-filter-tabs", Tabs)
-        managers = [
-            m
-            for m in self._ps.available_managers
-            if any(p.manager == m for p in self._installed_pkgs)
-        ]
-        current = {
-            tab.id
-            for tab in tabs.query("#tabs-list > Tab").results(Tab)
-            if tab.id and tab.id != "tab-all"
-        }
-        wanted = {f"tab-{m.value}" for m in managers}
-        for tab_id in current - wanted:
-            await tabs.remove_tab(tab_id)
-        for m in managers:
-            if f"tab-{m.value}" not in current:
-                await tabs.add_tab(Tab(m.value.upper(), id=f"tab-{m.value}"))
-        active_id = tabs.active or "tab-all"
-        if active_id == "tab-all":
-            self._installed_managers = None
-        else:
-            self._installed_managers = {PackageManager(active_id.removeprefix("tab-"))}
-        self._filter_installed(self.query_one("#installed-input", Input).value)
+        async with self._rebuild_lock:
+            tabs = self.query_one("#installed-filter-tabs", Tabs)
+            managers = [
+                m
+                for m in self._ps.available_managers
+                if any(p.manager == m for p in self._installed_pkgs)
+            ]
+            current = {
+                tab.id
+                for tab in tabs.query("#tabs-list > Tab").results(Tab)
+                if tab.id and tab.id != "tab-all"
+            }
+            wanted = {f"tab-{m.value}" for m in managers}
+            for tab_id in current - wanted:
+                await tabs.remove_tab(tab_id)
+            for m in managers:
+                if f"tab-{m.value}" not in current:
+                    await tabs.add_tab(Tab(m.value.upper(), id=f"tab-{m.value}"))
+            active_id = tabs.active or "tab-all"
+            if active_id == "tab-all":
+                self._installed_managers = None
+            else:
+                self._installed_managers = {PackageManager(active_id.removeprefix("tab-"))}
+            self._filter_installed(self.query_one("#installed-input", Input).value)
+
+    async def _rebuild_search_tabs(self):
+        async with self._rebuild_lock:
+            tabs = self.query_one("#search-filter-tabs", Tabs)
+            managers = [
+                m for m in self._ps.available_managers if supports(m, "search")
+            ]
+            current = {
+                tab.id
+                for tab in tabs.query("#tabs-list > Tab").results(Tab)
+                if tab.id and tab.id != "tab-all"
+            }
+            wanted = {f"tab-{m.value}" for m in managers}
+            for tab_id in current - wanted:
+                await tabs.remove_tab(tab_id)
+            for m in managers:
+                if f"tab-{m.value}" not in current:
+                    await tabs.add_tab(Tab(m.value.upper(), id=f"tab-{m.value}"))
+            if tabs.active is None:
+                tabs.active = "tab-all"
+
+    async def _rediscover_managers(self):
+        if not self.is_mounted or self._rediscovering:
+            return
+        self._rediscovering = True
+        try:
+            from features.package_store.registry import discover_managers
+            found = await asyncio.to_thread(discover_managers)
+            added = False
+            for mgr, adapter in found:
+                if self._ps.add_source(mgr, adapter):
+                    added = True
+            if added:
+                self.app.state_bus.emit("managers_changed", "", None)
+        finally:
+            self._rediscovering = False
+
+    async def _on_managers_changed(self):
+        if not self.is_mounted:
+            return
+        await self._rebuild_search_tabs()
+        await self._do_load_installed(force=True)
+        await self._rebuild_installed_tabs()
+        self._track(self._load_stats())
+        if self._search_query:
+            self._track(self._do_search(self._search_query, self._search_managers))
 
     def _show_installed(self, collection: PackageCollection):
         if self._installed_managers:
@@ -612,6 +664,7 @@ class StoreScreen(Screen):
         result = self._result("tools")
         if ok:
             result.update(f"[bold green]✓ AppImage installed: {name}[/bold green]")
+            self.app.state_bus.emit("install", name, PackageManager.APPIMAGE)
             self._track(self._do_load_installed())
         else:
             result.update(f"[bold red]✗ AppImage install failed: {name}[/bold red]")
@@ -623,7 +676,10 @@ class StoreScreen(Screen):
         name, mgr_str = self._get_cursor_row(section)
         if not name or not mgr_str:
             return
-        pkg = await asyncio.to_thread(self._ps.get_package_detail, name, PackageManager(mgr_str))
+        if PackageManager(mgr_str) == PackageManager.LOCAL:
+            pkg = await asyncio.to_thread(self._local_adapter.get_info, name)
+        else:
+            pkg = await asyncio.to_thread(self._ps.get_package_detail, name, PackageManager(mgr_str))
         if pkg:
             self.app.push_screen(PackageDetailScreen(pkg, self._ps))
 
@@ -631,6 +687,9 @@ class StoreScreen(Screen):
         self.query_one(f"#{section}-result-scroll").scroll_end(animate=False)
 
     def _start_operation(self, action: str, section: str, name: str, mgr: PackageManager):
+        executor = None
+        if section == "local":
+            executor = lambda n, m, on_output, cancel: self._local_adapter.remove(n, on_output, cancel)
         self.app.push_screen(
             InstallProgressScreen(
                 self._ps,
@@ -639,6 +698,7 @@ class StoreScreen(Screen):
                 mgr,
                 on_finish=self._on_operation_finished,
                 section=section,
+                executor=executor,
             )
         )
 
@@ -649,10 +709,6 @@ class StoreScreen(Screen):
             result.update(f"[bold red]✗ {label} cancelled ({name})[/bold red]")
         elif ok:
             result.update(f"[bold green]✓ {label} succeeded ({name})[/bold green]")
-            if action == "install":
-                self._mark_installed(name, mgr)
-            elif action == "remove":
-                self._mark_removed(name, mgr)
         else:
             result.update(f"[bold red]✗ {label} failed ({name})[/bold red]")
         self._auto_scroll_result(section)
@@ -664,6 +720,8 @@ class StoreScreen(Screen):
             self._track(self._load_local(force=True))
 
     async def _do_pkg_action(self, action: str, section: str):
+        if section == "local" and self._local_adapter is None:
+            await self._load_local()
         name, mgr_str = self._get_cursor_row(section)
         result = self._result(section)
         if not name or not mgr_str:
@@ -679,18 +737,47 @@ class StoreScreen(Screen):
             return
         self._start_operation(action, "tools", name, PackageManager(mgr_str))
 
-    def _mark_installed(self, name, mgr):
+    # ---------- state bus ----------
+
+    def _on_state_event(self, kind: str, name: str, mgr: PackageManager):
+        if kind == "install":
+            self._track(self._apply_installed(name, mgr))
+        elif kind == "remove":
+            self._track(self._apply_removed(name, mgr))
+        elif kind == "managers_changed":
+            self._track(self._on_managers_changed())
+
+    async def _apply_installed(self, name: str, mgr: PackageManager):
+        if not self.is_mounted:
+            return
         if (name, mgr) not in self._installed_set:
             self._installed_set.add((name, mgr))
             self._installed_pkgs.append(Package(name=name, manager=mgr))
         self._refresh_installed_view()
         self._track(self._rebuild_installed_tabs())
+        self._ps.invalidate_counts()
+        self._track(self._load_stats())
+        if self._search_query:
+            self._track(self._do_search(self._search_query, self._search_managers))
+        self._track(self._rediscover_managers())
 
-    def _mark_removed(self, name, mgr):
+    async def _apply_removed(self, name: str, mgr: PackageManager):
+        if not self.is_mounted:
+            return
         self._installed_set.discard((name, mgr))
         self._installed_pkgs = [p for p in self._installed_pkgs if not (p.name == name and p.manager == mgr)]
+        self._local_pkgs = [p for p in self._local_pkgs if not (p.name == name and p.manager == mgr)]
+        for table_id in ("installed-table", "local-table", "search-table"):
+            try:
+                self.query_one(f"#{table_id}", PackageTable).remove_package(name, mgr)
+            except Exception:
+                pass
         self._refresh_installed_view()
         self._track(self._rebuild_installed_tabs())
+        self._ps.invalidate_counts()
+        self._track(self._load_stats())
+        if self._search_query:
+            self._track(self._do_search(self._search_query, self._search_managers))
 
     def _refresh_installed_view(self):
         query = self.query_one("#installed-input", Input).value

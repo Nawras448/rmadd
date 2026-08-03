@@ -1,4 +1,4 @@
-# 📦 rmadd
+# 📦 rmadd 0.1.0
 
 An all-in-one, modular **Textual-based TUI application** designed for Linux system monitoring and cross-distribution package management.
 

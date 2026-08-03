@@ -130,6 +130,18 @@ class PackageTable(Vertical):
         for label, w in zip(labels, self._package_widths(self._table.size.width)):
             self._table.add_column(label, width=w)
 
+    def remove_package(self, name: str, mgr) -> bool:
+        key = f"{name}|{mgr.value}"
+        if key not in self._row_keys:
+            return False
+        try:
+            self._table.remove_row(key)
+        except Exception:
+            return False
+        self._row_keys.remove(key)
+        self._row_cells.pop(key, None)
+        return True
+
     def show_counts(self, counts: dict, *, loading: bool = False):
         self._table.clear(columns=True)
         self._row_keys = []

@@ -35,6 +35,14 @@ class PackageManagerService(GetPackagesUseCase, InstallPackageUseCase):
     def available_managers(self) -> list:
         return list(self._sources.keys())
 
+    def add_source(self, manager: PackageManager, source) -> bool:
+        """Register a newly discovered manager at runtime (no-op if known)."""
+        if manager in self._sources:
+            return False
+        self._sources[manager] = source
+        self._counts_cache = None
+        return True
+
     def default_search_managers(self) -> list:
         """Tier 1 + Tier 2 available managers that support search."""
         return [
@@ -128,6 +136,10 @@ class PackageManagerService(GetPackagesUseCase, InstallPackageUseCase):
         ordered = {mgr.value: str(result[mgr]) for mgr in self._sources if mgr in result}
         self._counts_cache = (now, ordered)
         return dict(ordered)
+
+    def invalidate_counts(self) -> None:
+        """Drop the cached counts so the next get_all_counts() refetches."""
+        self._counts_cache = None
 
     def list_repos(self, manager: PackageManager) -> list:
         return self._source(manager).list_repos()

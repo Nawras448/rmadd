@@ -5,6 +5,7 @@ from textual.binding import Binding
 from textual.theme import Theme
 
 from features.package_store.presentation.store_screen import StoreScreen
+from shared.state import PackageStateBus
 
 _CSS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "style.tcss")
 
@@ -64,6 +65,7 @@ class RmaddTuiApp(App):
         self.system_service = container.get_system_service()
         self.package_service = container.get_package_service()
         self.hardware_service = container.get_hardware_service()
+        self.state_bus = PackageStateBus()
 
     def bell(self) -> None:
         """Silence all framework bells (CSS errors, restricted input, fatal errors)."""
@@ -75,7 +77,10 @@ class RmaddTuiApp(App):
 
     def action_refresh(self):
         self.system_service.refresh()
+        self.package_service.invalidate_counts()
         screen = self.screen
         if hasattr(screen, "_refresh_stats"):
             screen._refresh_stats()
+        if hasattr(screen, "_rediscover_managers"):
+            screen._track(screen._rediscover_managers())
         self.notify("Data refreshed", timeout=3)

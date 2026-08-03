@@ -198,7 +198,7 @@ MANAGER_META: dict[PackageManager, ManagerMeta] = {
         ("pipx",),
         (),
         False,
-        frozenset({"install", "remove", "update", "list_installed"}),
+        frozenset({"search", "install", "remove", "update", "list_installed"}),
     ),
     PackageManager.CARGO: ManagerMeta(
         "cargo",
