@@ -44,27 +44,51 @@ monitoring and cross-distribution package management.
 
 ## Visual Overview
 
+All screenshots live in `docs/assets/`. Sizes are fixed for a consistent,
+scannable layout: the hero shot is 640 px wide, grid shots are 320 px each,
+and the logo is 180 px.
+
 <!-- Insert GIF demo here (e.g., docs/assets/optimistic-removal.gif) -->
 
+**Search & Dynamic Action Bar**
+
 <p align="center">
-  <img src="docs/assets/search-view.png" alt="Search Programs & Dynamic Action Bar" width="600"/>
-  <br/>
-  <em>Search tab with the context-aware action bar.</em>
+  <img src="docs/assets/search-view.png" alt="Search Programs & Dynamic Action Bar" width="640"/>
 </p>
 
 <p align="center">
-  <img src="docs/assets/installed-apps.png" alt="Installed Applications View" width="600"/>
-  <br/>
-  <em>Installed Applications with per-manager filtering.</em>
+  <em>Search tab: live results, installed-status labels, and the context-aware
+  action bar (Install / Remove / Update).</em>
 </p>
 
-<p align="center">
-  <img src="docs/assets/local-binaries.png" alt="Local Binaries & Instant Zero-Latency Deletion" width="600"/>
-  <br/>
-  <em>Local Binaries — rows vanish instantly on removal and reappear on failure.</em>
-</p>
+<table align="center">
+  <tr>
+    <td align="center">
+      <img src="docs/assets/installed-apps.png" alt="Installed Applications View" width="320"/>
+      <br/>
+      <em>Installed Applications with per-manager filtering.</em>
+    </td>
+    <td align="center">
+      <img src="docs/assets/local-binaries.png" alt="Local Binaries & Instant Zero-Latency Deletion" width="320"/>
+      <br/>
+      <em>Local Binaries — rows vanish instantly on removal and reappear on
+      failure.</em>
+    </td>
+  </tr>
+</table>
 
 <!-- Insert GIF demo here (e.g., docs/assets/demo.gif) -->
+
+**Expected asset files** (add to `docs/assets/`):
+
+| File | Size | Placement |
+|------|------|-----------|
+| `logo.png` | 180 px | Top of page, centered |
+| `search-view.png` | 640 px | Visual Overview hero shot |
+| `installed-apps.png` | 320 px | Visual Overview grid, left |
+| `local-binaries.png` | 320 px | Visual Overview grid, right |
+| `optimistic-removal.gif` | — | Optional demo (Visual Overview) |
+| `demo.gif` | — | Optional demo (Visual Overview) |
 
 ## Requirements
 
@@ -101,6 +125,9 @@ rmadd/
   config.py                  JSON config (ui.mode).
   logging.py                 file logging setup.
 style.tcss                   Textual CSS stylesheet.
+docs/
+  LOCAL_BINARIES.md          Local binaries guide (discovery & deletion).
+  assets/                    Logos, screenshots and demo GIFs.
 ```
 
 ## Download
