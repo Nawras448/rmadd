@@ -27,7 +27,10 @@ class Adapter(BaseAdapter):
         for line in out.split("\n"):
             parts = line.split()
             if len(parts) >= 2:
-                pkgs.append(Package(name=_strip_version(parts[1]),
+                token = parts[1]
+                name = _strip_version(token)
+                version = token[len(name) + 1:] if token.startswith(name + "-") else ""
+                pkgs.append(Package(name=name, version=version,
                                     summary=" ".join(parts[2:]) if len(parts) > 2 else "",
                                     manager=self._manager))
         return pkgs

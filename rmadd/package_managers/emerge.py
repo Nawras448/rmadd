@@ -4,7 +4,7 @@ import os
 import re
 from typing import Optional
 from rmadd.models import Package, PackageManager, PackageStatus, Repo
-from rmadd.package_managers.base import BaseAdapter
+from rmadd.package_managers.base import BaseAdapter, _strip_version
 
 class Adapter(BaseAdapter):
     def __init__(self):
@@ -31,7 +31,11 @@ class Adapter(BaseAdapter):
             m = re.match(r"^\[[^\]]*\]\s+(\S+)\s+(.*)$", line)
             if not m:
                 continue
-            pkgs.append(Package(name=m.group(1), summary=m.group(2).strip(), manager=self._manager))
+            token = m.group(1)
+            name = _strip_version(token)
+            version = token[len(name) + 1:] if token.startswith(name + "-") else ""
+            pkgs.append(Package(name=name, version=version,
+                                summary=m.group(2).strip(), manager=self._manager))
         return pkgs
 
     def get_info(self, name: str) -> Optional[Package]:

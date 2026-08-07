@@ -95,6 +95,11 @@ class InstallProgressScreen(Screen):
             self._queue.put(f"Error: {e}\n")
             self._finish(False)
 
+    def _emit(self, phase: str):
+        bus = getattr(self.app, "state_bus", None)
+        if bus is not None and self._action in ("install", "remove", "update"):
+            bus.emit(self._action, self._name, self._mgr, phase)
+
     def _finish(self, ok: bool):
         if self._done:
             return
@@ -107,13 +112,13 @@ class InstallProgressScreen(Screen):
         bar.update(total=100, progress=100)
         if ok:
             self._queue.put("Done.\n")
-            bus = getattr(self.app, "state_bus", None)
-            if bus is not None and self._action in ("install", "remove", "update"):
-                bus.emit(self._action, self._name, self._mgr)
+            self._emit("confirmed")
         elif self._cancel_event.is_set():
             self._queue.put("Operation cancelled.\n")
+            self._emit("reverted")
         else:
             self._queue.put("Operation failed.\n")
+            self._emit("reverted")
         self._drain_queue()
         if self._on_finish is not None:
             self._on_finish(self._action, self._section, self._name, self._mgr, ok, self._cancel_event.is_set())

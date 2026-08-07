@@ -9,6 +9,7 @@ from rmadd.models import (
     PackageManagerTier,
     TIER_LABELS,
     TIER_ORDER,
+    STATUS_GLYPH,
     tier,
 )
 
@@ -55,6 +56,7 @@ class PackageTable(Vertical):
         self.border_title = "Packages"
         self._row_keys: list[str] = []
         self._row_cells: dict[str, list] = {}
+        self._row_status: dict[str, PackageStatus] = {}
 
     def compose(self):
         self._table = DataTable(id="inner-table", cursor_type="row", show_cursor=True, show_row_labels=False)
@@ -68,11 +70,28 @@ class PackageTable(Vertical):
             if key in seen:
                 continue
             seen.add(key)
-            status_char = "✓" if pkg.status == PackageStatus.INSTALLED else "○"
+            status = self._row_status.get(key, pkg.status)
+            status_char = STATUS_GLYPH.get(status, "\u2022")
             wanted.append(
                 [key, [status_char, pkg.name, pkg.version or "—", pkg.arch or "—", tier_tag(pkg.manager)]]
             )
         return wanted
+
+    def set_row_status(self, key: str, status: PackageStatus) -> None:
+        """Override the status glyph for an existing row (e.g. pending ops).
+
+        Falls back to the package's own status once cleared.
+        """
+        self._row_status[key] = status
+        if key in self._row_cells:
+            self._row_cells[key][0] = STATUS_GLYPH.get(status, "\u2022")
+            try:
+                self._table.update_cell(key, 0, self._row_cells[key][0])
+            except Exception:
+                pass
+
+    def clear_row_status(self, key: str) -> None:
+        self._row_status.pop(key, None)
 
     def show_packages(self, collection: PackageCollection):
         if len(self._table.columns) != 5:
@@ -80,6 +99,7 @@ class PackageTable(Vertical):
             self._add_package_columns()
             self._row_keys = []
             self._row_cells = {}
+            self._row_status = {}
         wanted = self._wanted_rows(collection)
         wanted_keys = [w[0] for w in wanted]
         if wanted_keys == self._row_keys:
@@ -97,6 +117,7 @@ class PackageTable(Vertical):
             self._table.clear()
             self._row_keys = []
             self._row_cells = {}
+            self._row_status = {}
             for key, cells in wanted:
                 self._table.add_row(*cells, key=key)
                 self._row_keys.append(key)

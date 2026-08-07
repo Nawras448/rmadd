@@ -10,6 +10,7 @@ PackageManager source (PackageManager.LOCAL).
 
 import os
 import platform
+import shutil
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -196,17 +197,49 @@ class Adapter(BasePackageManager):
         return False
 
     def remove(self, name: str, on_output=None, cancel_event=None) -> bool:
-        path = self._scanner.find_path(name)
+        """Physically delete the binary backing ``name``.
+
+        The absolute path is resolved in order: the scanner's known location
+        (covers ``~/.local/bin``, ``~/bin``, ``/usr/local/bin`` and symlinks),
+        then ``shutil.which`` as a full-``$PATH`` fallback (covers e.g.
+        ``/usr/bin``). User-writable paths are unlinked directly; system paths
+        fall back to an elevated ``pkexec``/``sudo rm -f``.
+        """
+        path = self._scanner.find_path(name) or shutil.which(name)
         if not path:
+            if on_output is not None:
+                on_output(f"Error: binary '{name}' not found on PATH\n")
             return False
         try:
             os.unlink(path)
-            self._scanner.invalidate(path)
-            return True
-        except Exception as e:
+        except PermissionError:
+            if not self._remove_privileged(path, on_output):
+                return False
+        except OSError as e:
             if on_output is not None:
                 on_output(f"Error: {e}\n")
             return False
+        self._scanner.invalidate(path)
+        return True
+
+    @staticmethod
+    def _remove_privileged(path: str, on_output=None) -> bool:
+        for tool in ("pkexec", "sudo"):
+            if shutil.which(tool):
+                try:
+                    proc = subprocess.run(
+                        [tool, "rm", "-f", "--", path],
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
+                    )
+                except Exception:
+                    continue
+                if proc.returncode == 0:
+                    return True
+                if on_output is not None:
+                    on_output(f"{tool} rm failed: {proc.stderr.strip()}\n")
+        return False
 
     def update(self, name: str, on_output=None, cancel_event=None) -> bool:
         return False

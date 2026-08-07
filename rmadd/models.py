@@ -49,8 +49,18 @@ class PackageManagerTier(str, Enum):
 class PackageStatus(str, Enum):
     INSTALLED = "installed"
     AVAILABLE = "available"
+    PENDING = "pending"
     UPDATING = "updating"
     ERROR = "error"
+
+
+STATUS_GLYPH: dict[PackageStatus, str] = {
+    PackageStatus.INSTALLED: "\u2713",
+    PackageStatus.PENDING: "~",
+    PackageStatus.UPDATING: "\u25b2",
+    PackageStatus.ERROR: "!",
+    PackageStatus.AVAILABLE: "\u25cb",
+}
 
 
 TIER_MAP: dict[PackageManager, PackageManagerTier] = {

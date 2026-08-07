@@ -30,11 +30,17 @@ class Adapter(BaseAdapter):
         return pkgs
 
     def _do_search(self, query: str) -> list:
-        out = self._run(["apk", "search", query])
+        out = self._run(["apk", "search", "-v", query])
         pkgs = []
         for line in out.split("\n"):
             token = line.split()[0] if line.split() else ""
-            if token:
+            if not token:
+                continue
+            m = re.match(r"^(?P<name>.+?)-(?P<version>\d[\w.]*-r\d+)$", token)
+            if m:
+                pkgs.append(Package(name=m.group("name"), version=m.group("version"),
+                                    manager=self._manager))
+            else:
                 pkgs.append(Package(name=_strip_version(token), manager=self._manager))
         return pkgs
 

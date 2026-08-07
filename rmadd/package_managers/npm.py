@@ -28,7 +28,9 @@ class Adapter(BaseAdapter):
         for line in out.split("\n"):
             parts = line.split("|")
             if len(parts) >= 2 and parts[0].strip() and not parts[0].startswith("NAME"):
-                pkgs.append(Package(name=parts[0].strip(), summary=parts[1].strip() if len(parts) > 1 else "",
+                pkgs.append(Package(name=parts[0].strip(),
+                                    version=parts[4].strip() if len(parts) > 4 else "",
+                                    summary=parts[1].strip() if len(parts) > 1 else "",
                                     manager=self._manager))
         return pkgs
 

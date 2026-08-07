@@ -21,8 +21,10 @@ class Adapter(BaseAdapter):
                 continue
             parts = line.split()
             if len(parts) >= 2:
-                pkgs.append(Package(name=parts[1].split("/")[-1] if "/" in parts[1] else parts[1],
-                                    summary=" ".join(parts[2:]) if len(parts) > 2 else "", manager=self._manager))
+                name = parts[0].split("/")[-1] if "/" in parts[0] else parts[0]
+                pkgs.append(Package(name=name, version=parts[1],
+                                    summary=" ".join(parts[2:]) if len(parts) > 2 else "",
+                                    manager=self._manager))
         return pkgs
 
     def get_info(self, name: str) -> Optional[Package]:

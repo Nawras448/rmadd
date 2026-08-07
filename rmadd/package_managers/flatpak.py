@@ -38,7 +38,8 @@ class Adapter(BaseAdapter):
             if parts and parts[0].strip():
                 name = parts[2].strip() if len(parts) > 2 else parts[0].strip()
                 summary = parts[1].strip() if len(parts) > 1 else ""
-                pkgs.append(Package(name=name, summary=summary, manager=self._manager))
+                version = parts[3].strip() if len(parts) > 3 else ""
+                pkgs.append(Package(name=name, version=version, summary=summary, manager=self._manager))
         return pkgs
 
     def get_info(self, name: str) -> Optional[Package]:

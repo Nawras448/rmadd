@@ -34,6 +34,8 @@ class StoreScreen(Screen):
         self._installed_managers: set[PackageManager] | None = None
         self._installed_pkgs: list[Package] = []
         self._installed_set: set[tuple[str, PackageManager]] = set()
+        self._pending_ops: dict[tuple[str, PackageManager], str] = {}
+        self._removal_stash: dict[tuple[str, PackageManager], tuple[Package, int]] = {}
         self._tools: list = []
         self._active_section = "search"
         self._search_gen = 0
@@ -99,7 +101,10 @@ class StoreScreen(Screen):
                     yield PackageTable(id="search-table")
                     with Horizontal(id="search-action-bar"):
                         yield Static(id="search-sel", classes="sel-label")
+                        yield Static(id="search-status", classes="sel-label")
                         yield Button("Install", id="btn-search-install", variant="primary")
+                        yield Button("Remove", id="btn-search-remove", variant="error")
+                        yield Button("Update", id="btn-search-update", variant="default")
                         yield Button("Details", id="btn-search-details", variant="default")
                     with VerticalScroll(id="search-result-scroll", classes="result-scroll"):
                         yield Static(id="search-result")
@@ -165,6 +170,27 @@ class StoreScreen(Screen):
         key = cell_key.row_key.value
         parts = key.split("|", 1) if "|" in key else (key, "")
         return (parts[0], parts[1]) if len(parts) == 2 else ("", "")
+
+    def _is_installed(self, name: str, mgr: PackageManager) -> bool:
+        """Single source of truth for "is this package currently installed".
+
+        Consults the optimistic state: a pending install counts as installed,
+        a pending remove counts as not (so the Install button can re-appear).
+        """
+        key = (name, mgr)
+        pending = self._pending_ops.get(key)
+        if pending is not None:
+            return pending != "remove"
+        return key in self._installed_set
+
+    def _installed_version_map(self) -> dict:
+        """Map (name, mgr) -> version for all known installed packages that
+        carry a version, used to enrich search results at render time."""
+        return {
+            (p.name, p.manager): p.version
+            for p in self._installed_pkgs
+            if p.version
+        }
 
     def _move_cursor_first_row(self, table):
         dt = table._table
@@ -465,10 +491,13 @@ class StoreScreen(Screen):
             self._render_search_results(table, PackageCollection(merged), q, result)
 
     def _render_search_results(self, table, collection, q, result, incremental=False):
+        version_map = self._installed_version_map()
         for p in collection:
+            if not p.version:
+                p.version = version_map.get((p.name, p.manager), "")
             p.status = (
                 PackageStatus.INSTALLED
-                if (p.name, p.manager) in self._installed_set
+                if self._is_installed(p.name, p.manager)
                 else PackageStatus.AVAILABLE
             )
         table.show_packages(collection)
@@ -565,6 +594,10 @@ class StoreScreen(Screen):
             self._open_appimage_install()
         elif bid == "btn-search-install":
             self._track(self._do_pkg_action("install", "search"))
+        elif bid == "btn-search-remove":
+            self._track(self._do_pkg_action("remove", "search"))
+        elif bid == "btn-search-update":
+            self._track(self._do_pkg_action("update", "search"))
         elif bid == "btn-search-details":
             self._open_detail("search")
         elif bid == "btn-installed-remove":
@@ -640,6 +673,8 @@ class StoreScreen(Screen):
             await self._do_pkg_action("remove", "installed")
         elif self._active_section == "local":
             await self._do_pkg_action("remove", "local")
+        elif self._active_section == "search":
+            await self._do_pkg_action("remove", "search")
 
     async def action_quick_update(self):
         if self._active_section == "about":
@@ -648,6 +683,8 @@ class StoreScreen(Screen):
             await self._do_tool_action("update")
         elif self._active_section == "installed":
             await self._do_pkg_action("update", "installed")
+        elif self._active_section == "search":
+            await self._do_pkg_action("update", "search")
 
     def _open_detail(self, section: str):
         self._track(self._do_open_detail(section))
@@ -676,12 +713,15 @@ class StoreScreen(Screen):
         name, mgr_str = self._get_cursor_row(section)
         if not name or not mgr_str:
             return
-        if PackageManager(mgr_str) == PackageManager.LOCAL:
+        mgr = PackageManager(mgr_str)
+        if mgr == PackageManager.LOCAL:
             pkg = await asyncio.to_thread(self._local_adapter.get_info, name)
+            installed = True
         else:
-            pkg = await asyncio.to_thread(self._ps.get_package_detail, name, PackageManager(mgr_str))
+            pkg = await asyncio.to_thread(self._ps.get_package_detail, name, mgr)
+            installed = self._is_installed(name, mgr)
         if pkg:
-            self.app.push_screen(PackageDetailScreen(pkg, self._ps))
+            self.app.push_screen(PackageDetailScreen(pkg, self._ps, is_installed=installed))
 
     def _auto_scroll_result(self, section: str):
         self.query_one(f"#{section}-result-scroll").scroll_end(animate=False)
@@ -690,6 +730,7 @@ class StoreScreen(Screen):
         executor = None
         if section == "local":
             executor = lambda n, m, on_output, cancel: self._local_adapter.remove(n, on_output, cancel)
+        self.app.state_bus.emit(action, name, mgr, phase="pending")
         self.app.push_screen(
             InstallProgressScreen(
                 self._ps,
@@ -707,10 +748,14 @@ class StoreScreen(Screen):
         label = action.title()
         if cancelled:
             result.update(f"[bold red]✗ {label} cancelled ({name})[/bold red]")
+            if action == "remove":
+                self.notify(f"Remove cancelled ({name})", severity="warning")
         elif ok:
             result.update(f"[bold green]✓ {label} succeeded ({name})[/bold green]")
         else:
             result.update(f"[bold red]✗ {label} failed ({name})[/bold red]")
+            if action == "remove":
+                self.notify(f"Failed to remove {name} — it may still be present", severity="error")
         self._auto_scroll_result(section)
         if section == "tools":
             self._tools = detect_tools()
@@ -727,7 +772,47 @@ class StoreScreen(Screen):
         if not name or not mgr_str:
             result.update("[bold red]No package selected — use ↑↓ to select one first[/bold red]")
             return
-        self._start_operation(action, section, name, PackageManager(mgr_str))
+        mgr = PackageManager(mgr_str)
+        if section == "search":
+            installed = self._is_installed(name, mgr)
+            if action == "install" and installed:
+                result.update("[yellow]Already installed — use Remove/Update instead[/yellow]")
+                return
+            if action in ("remove", "update") and not installed:
+                result.update("[bold red]Not installed — use Install instead[/bold red]")
+                return
+        if action == "remove":
+            self._remove_instantly(section, name, mgr)
+        self._start_operation(action, section, name, mgr)
+
+    def _remove_instantly(self, section: str, name: str, mgr: PackageManager):
+        """Zero-latency optimistic removal: drop the row and all in-memory
+        caches before any subprocess work. The original Package object is
+        stashed so a failed removal can restore it verbatim."""
+        key = (name, mgr)
+        pkg = next((p for p in self._installed_pkgs if (p.name, p.manager) == key), None)
+        if pkg is None:
+            pkg = next((p for p in self._local_pkgs if (p.name, p.manager) == key), None)
+        if pkg is None:
+            pkg = Package(name=name, manager=mgr)
+        source = self._installed_pkgs if key in self._installed_set else self._local_pkgs
+        try:
+            index = source.index(pkg)
+        except ValueError:
+            index = -1
+        self._removal_stash[key] = (pkg, index)
+        self._installed_set.discard(key)
+        self._installed_pkgs = [p for p in self._installed_pkgs if (p.name, p.manager) != key]
+        self._local_pkgs = [p for p in self._local_pkgs if (p.name, p.manager) != key]
+        for table_id in ("installed-table", "local-table", "search-table"):
+            try:
+                self.query_one(f"#{table_id}", PackageTable).remove_package(name, mgr)
+            except Exception:
+                pass
+        self._refresh_installed_view()
+        self._fast_counts()
+        self._update_search_actions()
+        self._rerun_search()
 
     async def _do_tool_action(self, action: str):
         name, mgr_str = self._get_cursor_row("tools")
@@ -739,43 +824,146 @@ class StoreScreen(Screen):
 
     # ---------- state bus ----------
 
-    def _on_state_event(self, kind: str, name: str, mgr: PackageManager):
-        if kind == "install":
-            self._track(self._apply_installed(name, mgr))
-        elif kind == "remove":
-            self._track(self._apply_removed(name, mgr))
-        elif kind == "managers_changed":
+    def _on_state_event(self, kind: str, name: str, mgr: PackageManager, phase: str = "confirmed"):
+        if kind == "managers_changed":
             self._track(self._on_managers_changed())
+            return
+        if phase == "pending":
+            self._register_pending(kind, name, mgr)
+        elif phase == "reverted":
+            self._track(self._revert_pending(kind, name, mgr))
+        else:
+            self._track(self._settle_confirmed(kind, name, mgr))
 
-    async def _apply_installed(self, name: str, mgr: PackageManager):
+    def _register_pending(self, action: str, name: str, mgr: PackageManager):
+        """Optimistic write: reflect the op in the UI instantly, before any
+        subprocess result. The row is tinted with the pending glyph."""
+        key = (name, mgr)
+        self._pending_ops[key] = action
+        if action == "install":
+            if key not in self._installed_set:
+                self._installed_set.add(key)
+                self._installed_pkgs.append(
+                    Package(name=name, manager=mgr, status=PackageStatus.PENDING)
+                )
+            self._refresh_installed_view()
+            self._set_row_status("installed-table", name, mgr, PackageStatus.PENDING)
+        elif action == "remove":
+            pass
+        elif action == "update":
+            self._set_row_status("installed-table", name, mgr, PackageStatus.UPDATING)
+        self._fast_counts()
+        self._update_search_actions()
+
+    async def _settle_confirmed(self, action: str, name: str, mgr: PackageManager):
+        """Settle the optimistic write once the operation actually succeeded."""
         if not self.is_mounted:
             return
-        if (name, mgr) not in self._installed_set:
-            self._installed_set.add((name, mgr))
-            self._installed_pkgs.append(Package(name=name, manager=mgr))
+        key = (name, mgr)
+        self._pending_ops.pop(key, None)
+        self._clear_row_status_all(name, mgr)
+        if action == "install":
+            if key not in self._installed_set:
+                self._installed_set.add(key)
+                self._installed_pkgs.append(Package(name=name, manager=mgr))
+            for p in self._installed_pkgs:
+                if (p.name, p.manager) == key:
+                    p.status = PackageStatus.INSTALLED
+            self._refresh_installed_view()
+            self._track(self._rebuild_installed_tabs())
+            self._track(self._rediscover_managers())
+        elif action == "remove":
+            self._removal_stash.pop(key, None)
+            self._installed_set.discard(key)
+            self._installed_pkgs = [p for p in self._installed_pkgs if not (p.name == name and p.manager == mgr)]
+            self._local_pkgs = [p for p in self._local_pkgs if not (p.name == name and p.manager == mgr)]
+            for table_id in ("installed-table", "local-table", "search-table"):
+                try:
+                    self.query_one(f"#{table_id}", PackageTable).remove_package(name, mgr)
+                except Exception:
+                    pass
+            self._refresh_installed_view()
+            self._track(self._rebuild_installed_tabs())
+        else:  # update
+            for p in self._installed_pkgs:
+                if (p.name, p.manager) == key:
+                    p.status = PackageStatus.INSTALLED
+            self._refresh_installed_view()
+        self._ps.invalidate_counts()
+        self._fast_counts()
+        self._rerun_search()
+        self._update_search_actions()
+
+    async def _revert_pending(self, action: str, name: str, mgr: PackageManager):
+        """Undo the optimistic write when the op failed or was cancelled.
+        In-memory only; no subprocess rescan happens (error/cancel surfaces via
+        the action-result message already emitted by the caller)."""
+        if not self.is_mounted:
+            return
+        key = (name, mgr)
+        self._pending_ops.pop(key, None)
+        self._clear_row_status_all(name, mgr)
+        if action == "install":
+            self._installed_set.discard(key)
+            self._installed_pkgs = [p for p in self._installed_pkgs if not (p.name == name and p.manager == mgr)]
+            for table_id in ("installed-table", "search-table"):
+                try:
+                    self.query_one(f"#{table_id}", PackageTable).remove_package(name, mgr)
+                except Exception:
+                    pass
+        elif action == "remove":
+            pkg, index = self._removal_stash.pop(key, (None, -1))
+            if pkg is None:
+                pkg = Package(name=name, manager=mgr)
+            self._installed_set.add(key)
+            if pkg.manager == PackageManager.LOCAL:
+                if not any((p.name, p.manager) == key for p in self._local_pkgs):
+                    self._local_pkgs.insert(index if 0 <= index < len(self._local_pkgs) else len(self._local_pkgs), pkg)
+                self._show_local(self._local_pkgs)
+            else:
+                if not any((p.name, p.manager) == key for p in self._installed_pkgs):
+                    self._installed_pkgs.insert(index if 0 <= index < len(self._installed_pkgs) else len(self._installed_pkgs), pkg)
+        else:  # update
+            for p in self._installed_pkgs:
+                if (p.name, p.manager) == key:
+                    p.status = PackageStatus.INSTALLED
         self._refresh_installed_view()
         self._track(self._rebuild_installed_tabs())
-        self._ps.invalidate_counts()
-        self._track(self._load_stats())
-        if self._search_query:
-            self._track(self._do_search(self._search_query, self._search_managers))
-        self._track(self._rediscover_managers())
+        self._fast_counts()
+        self._rerun_search()
+        self._update_search_actions()
 
-    async def _apply_removed(self, name: str, mgr: PackageManager):
-        if not self.is_mounted:
-            return
-        self._installed_set.discard((name, mgr))
-        self._installed_pkgs = [p for p in self._installed_pkgs if not (p.name == name and p.manager == mgr)]
-        self._local_pkgs = [p for p in self._local_pkgs if not (p.name == name and p.manager == mgr)]
-        for table_id in ("installed-table", "local-table", "search-table"):
+    def _clear_row_status_all(self, name: str, mgr: PackageManager):
+        key = f"{name}|{mgr.value}"
+        for table_id in ("installed-table", "search-table"):
             try:
-                self.query_one(f"#{table_id}", PackageTable).remove_package(name, mgr)
+                self.query_one(f"#{table_id}", PackageTable).clear_row_status(key)
             except Exception:
                 pass
-        self._refresh_installed_view()
-        self._track(self._rebuild_installed_tabs())
-        self._ps.invalidate_counts()
-        self._track(self._load_stats())
+
+    def _set_row_status(self, table_id: str, name: str, mgr: PackageManager, status: PackageStatus):
+        try:
+            key = f"{name}|{mgr.value}"
+            self.query_one(f"#{table_id}", PackageTable).set_row_status(key, status)
+        except Exception:
+            pass
+
+    def _fast_counts(self):
+        """Patch the counts table from the in-memory installed set only.
+
+        Exact per-manager counts are reconciled later by the 5s stats tick,
+        so an op does not trigger any subprocess call here."""
+        counts: dict[str, int] = {}
+        for _name, mgr in self._installed_set:
+            counts[mgr.value] = counts.get(mgr.value, 0) + 1
+        if not counts:
+            return
+        try:
+            self.query_one("#package-table", PackageTable).show_counts(counts)
+        except Exception:
+            pass
+
+    def _rerun_search(self):
         if self._search_query:
             self._track(self._do_search(self._search_query, self._search_managers))
 
@@ -789,9 +977,23 @@ class StoreScreen(Screen):
         name, mgr_str = self._get_cursor_row("search")
         bar = self.query_one("#search-action-bar", Horizontal)
         label = self.query_one("#search-sel", Static)
+        status = self.query_one("#search-status", Static)
+        install_btn = self.query_one("#btn-search-install", Button)
+        remove_btn = self.query_one("#btn-search-remove", Button)
+        update_btn = self.query_one("#btn-search-update", Button)
         if name and mgr_str:
             bar.display = True
+            mgr = PackageManager(mgr_str)
+            installed = self._is_installed(name, mgr)
             label.update(f"[bold]{name}[/bold] ({mgr_str})")
+            install_btn.display = not installed and supports(mgr, "install")
+            remove_btn.display = installed and supports(mgr, "remove")
+            update_btn.display = installed and supports(mgr, "update")
+            status.update(
+                "[bold green]✓ Already Installed[/bold green]"
+                if installed
+                else "[yellow]○ Available[/yellow]"
+            )
         else:
             bar.display = False
         apply_pane_floor(self._table_for("search"))

@@ -1,4 +1,8 @@
-# rmadd 0.1.0
+<p align="center">
+  <img src="docs/assets/logo.png" alt="rmadd Logo" width="180"/>
+</p>
+
+# rmadd
 
 An all-in-one, modular Textual-based TUI application for Linux system
 monitoring and cross-distribution package management.
@@ -9,6 +13,19 @@ monitoring and cross-distribution package management.
 
 ## Features
 
+* **Instant Optimistic UI** — actions mutate the UI and in-memory state
+  immediately (zero-latency row removal), then reconcile with the real
+  subprocess result through a confirm/revert lifecycle on the state bus.
+* **Direct Action Flow** — no blocking confirmation dialogs: `remove` fires
+  immediately; a failed removal silently restores the row and surfaces a
+  toast.
+* **Dynamic Search Action Bar** — the Search tab is context-aware: installed
+  packages show Remove/Update, available ones show Install, with a live
+  installed/available status label and installed-version enrichment.
+* **Physical Local Binary Management** — the Local Binaries tab resolves
+  absolute paths via `$PATH` scanning and `shutil.which()`, unlinks
+  user-level binaries directly, and elevates via `pkexec`/`sudo` for system
+  paths like `/usr/bin`.
 * Dynamic System Info: distribution, kernel, architecture and uptime without
   distro-specific hardcoding.
 * Package Manager Detection: probes and counts installed packages across
@@ -25,6 +42,30 @@ monitoring and cross-distribution package management.
 * Flat package layout: everything lives under one `rmadd/` package - no DI
   container, no hexagonal indirection.
 
+## Visual Overview
+
+<!-- Insert GIF demo here (e.g., docs/assets/optimistic-removal.gif) -->
+
+<p align="center">
+  <img src="docs/assets/search-view.png" alt="Search Programs & Dynamic Action Bar" width="600"/>
+  <br/>
+  <em>Search tab with the context-aware action bar.</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/installed-apps.png" alt="Installed Applications View" width="600"/>
+  <br/>
+  <em>Installed Applications with per-manager filtering.</em>
+</p>
+
+<p align="center">
+  <img src="docs/assets/local-binaries.png" alt="Local Binaries & Instant Zero-Latency Deletion" width="600"/>
+  <br/>
+  <em>Local Binaries — rows vanish instantly on removal and reappear on failure.</em>
+</p>
+
+<!-- Insert GIF demo here (e.g., docs/assets/demo.gif) -->
+
 ## Requirements
 
 * Python 3.10+
@@ -38,13 +79,16 @@ main.py
 rmadd/
   models.py                  PackageManager, Package, PackageCollection,
                              SystemInfo and hardware dataclasses.
+  state.py                   PackageStateBus - app-wide pub/sub bus with
+                             pending/confirmed/reverted lifecycle phases.
   package_managers/          BaseAdapter + discovery registry, plus one
     base.py                  module per package manager and the service.
     service.py               PackageManagerService: search/install/counts.
     <manager>.py             one adapter per manager (apt, dnf, flatpak, ...)
-    local.py                 opt-in PATH binary scanner.
+    local.py                 opt-in PATH binary scanner + physical removal.
   screens/
-    store_screen.py          StoreScreen: the tabbed store screen.
+    store_screen.py          StoreScreen: the tabbed store screen; owns the
+                             optimistic lifecycle (instant removal + revert).
     widgets/                 PackageTable, ToolsTable, SystemCard.
     install_progress_screen.py, package_detail_screen.py,
     appimage_install_screen.py
@@ -100,4 +144,6 @@ echo '{"ui":{"mode":"tui"}}' > ~/.config/rmadd/config.json
 
 ## Documentation
 
-See `ARCHITECTURE.md` for the module map and data flow.
+* `ARCHITECTURE.md` — module map, data flow, `PackageStateBus` lifecycle.
+* `docs/LOCAL_BINARIES.md` — local binary discovery, path resolution and
+  deletion permissions.

@@ -59,9 +59,10 @@ main.py
 1. **Read path (off the UI thread):** StoreScreen calls services via
    `asyncio.to_thread`. PackageManagerService fans out to a ThreadPoolExecutor,
    merges results, caches counts and searches.
-2. **Write/op path:** key/button action -> InstallProgressScreen ->
+2. **Write/op path:** key/button action -> StoreScreen `_start_operation`
+   (emits `phase="pending"` on the bus) -> `InstallProgressScreen` ->
    `package_service.install/remove/update` -> adapter `_run_stream()` (cancel
-   via threading.Event) -> emits to the bus on completion.
+   via threading.Event) -> emits `"confirmed"` or `"reverted"` on completion.
 3. **Refresh path:** `state_bus.emit(kind, name, mgr)` -> StoreScreen
    `_on_state_event` -> updates installed set, invalidates counts, re-runs
    search, reloads stats, triggers `_rediscover_managers()`.
@@ -70,9 +71,10 @@ main.py
 
 ## 3. Gotchas & going forward
 
-- **Reactivity:** the app only renders what the state bus tells it to. Any new
-  modal that changes package state must end with
-  `app.state_bus.emit("install"|"remove"|"update", name, mgr)`.
+- **Reactivity:** the app only renders what the state bus tells it to. Any op
+  path must end with
+  `app.state_bus.emit("install"|"remove"|"update", name, mgr, phase)`
+  (default `"confirmed"`), or the Installed tab will not reset.
 - **Adding a manager:** 1) add enum + tier/meta in `rmadd/models.py`;
   2) add `<manager>.py` in `rmadd/package_managers/` exposing an `Adapter`
   subclass of `BaseAdapter`; 3) register the module. Register modules discovered
@@ -84,17 +86,75 @@ main.py
 ## 4. Package state bus
 
 `rmadd/state.py` `PackageStateBus` supports subscribe / unsubscribe / emit.
-The contract is `emit(kind, name, mgr)`.
+The contract is `emit(kind, name, mgr, phase)` where `phase` is one of
+`"pending"` (optimistic write, emitted by the screen that starts the op),
+`"confirmed"` (succeeded) or `"reverted"` (failed/cancelled). The 3-arg form
+defaults to `"confirmed"` for backward compatibility.
 
-| kind             | name | mgr            | Emitter                                            |
-|------------------|------|----------------|----------------------------------------------------|
-| install          | pkg  | manager        | InstallProgressScreen on success                   |
-| remove           | pkg  | manager        | InstallProgressScreen on success                   |
-| update           | pkg  | manager        | InstallProgressScreen on success                   |
-| install          | pkg  | APPIMAGE       | StoreScreen (AppImage install path)                |
-| managers_changed | ""   | None           | StoreScreen `_rediscover_managers()`               |
+| kind             | name | mgr            | phase           | Emitter                                            |
+|------------------|------|----------------|-----------------|----------------------------------------------------|
+| install          | pkg  | manager        | pending         | StoreScreen `_start_operation` / PackageDetailScreen |
+| install/remove/update | pkg | manager    | confirmed       | InstallProgressScreen on success                   |
+| install/remove/update | pkg | manager    | reverted        | InstallProgressScreen on failure/cancel            |
+| install          | pkg  | APPIMAGE       | confirmed       | StoreScreen (AppImage install path)                |
+| managers_changed | ""   | None           | (n/a)           | StoreScreen `_rediscover_managers()`               |
+
+StoreScreen owns the optimistic lifecycle: `pending` writes straight into the
+in-memory installed set (`_register_pending`), `confirmed` settles it
+(`_settle_confirmed`) and `reverted` undoes it in-memory without a rescan
+(`_revert_pending`).
+
+### Optimistic lifecycle: Action Trigger -> Memory Mutation -> Subprocess Exec
+-> Confirm/Revert
+
+1. **Trigger / memory mutation** — for `remove`, StoreScreen first calls
+   `_remove_instantly()`: the row is dropped from `PackageTable` (and the
+   local/search tables), the key is discarded from `_installed_set`,
+   `_installed_pkgs`/`_local_pkgs` are filtered, counts are patched from
+   memory (`_fast_counts`), and the search action bar re-evaluates — all
+   before any subprocess work. The original `Package` object plus its list
+   index are stashed in `_removal_stash` so a failure can restore it
+   verbatim (version, status, path for LOCAL).
+2. **Pending** — `_start_operation` emits `phase="pending"`;
+   `_register_pending` records the op in `_pending_ops` (this drives the
+   context-aware guards and search action bar) and pushes
+   `InstallProgressScreen`.
+3. **Subprocess exec** — the adapter runs off the UI thread
+   (`asyncio.to_thread` + `_run_stream`), streaming output and honouring
+   cancel.
+4. **Confirm** — success emits `"confirmed"`; `_settle_confirmed` settles
+   (pops the stash, keeps the optimistic removal) and refreshes tabs,
+   counts and search.
+5. **Revert** — failure or cancel emits `"reverted"`; `_revert_pending`
+   re-inserts the stashed `Package` at its original index, restores
+   `_installed_set`, re-renders the view, and the caller surfaces a toast
+   (`error` on failure, `warning` on cancel).
+
+### Direct action flow (no confirmation dialogs)
+
+Removal is deliberately un-gated: `_do_pkg_action("remove", ...)` runs the
+instant mutation and starts the operation immediately from every context
+(Installed, Search, Local) and from `PackageDetailScreen`. Safety is
+provided reactively — a failed removal restores the row and notifies the
+user — rather than by a blocking modal.
+
+### Context-aware action rendering
+
+* **Search tab** — `_update_search_actions()` shows Remove/Update for
+  installed items and Install for available ones (`#search-status` renders
+  "Already Installed"/"Available"); `_is_installed()` consults
+  `_pending_ops` first so the bar updates mid-operation. Search results are
+  enriched with the installed version when the adapter output lacks one.
+* **PackageDetailScreen** — receives `is_installed` from the caller (no
+  subprocess status probe), and `_rebuild_actions()` shows only the buttons
+  the package state and the manager's `supports()` allow; `_run_action`
+  re-guards install/remove/update and refreshes state after each op.
 
 Subscribers: StoreScreen `_on_state_event` (mounted/unmounted with the screen).
 
-This is the only reactive channel the UI uses: modals must end with
-`app.state_bus.emit(action, name, mgr)` or the Installed tab will not reset.
+This is the only reactive channel the UI uses: op paths must end with
+`app.state_bus.emit(action, name, mgr, phase)` or the Installed tab will not
+reset.
+
+See `docs/LOCAL_BINARIES.md` for the local binary discovery, path-resolution
+and elevated-deletion mechanics.
