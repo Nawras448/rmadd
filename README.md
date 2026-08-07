@@ -79,16 +79,6 @@ and the logo is 180 px.
 
 <!-- Insert GIF demo here (e.g., docs/assets/demo.gif) -->
 
-**Expected asset files** (add to `docs/assets/`):
-
-| File | Size | Placement |
-|------|------|-----------|
-| `logo.png` | 180 px | Top of page, centered |
-| `search-view.png` | 640 px | Visual Overview hero shot |
-| `installed-apps.png` | 320 px | Visual Overview grid, left |
-| `local-binaries.png` | 320 px | Visual Overview grid, right |
-| `optimistic-removal.gif` | — | Optional demo (Visual Overview) |
-| `demo.gif` | — | Optional demo (Visual Overview) |
 
 ## Requirements
 
