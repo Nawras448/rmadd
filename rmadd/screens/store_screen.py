@@ -220,7 +220,7 @@ class StoreScreen(Screen):
         self._track(self._do_load_installed())
         self._track(self._load_stats())
         self._stats_interval = self.set_interval(5.0, self._on_stats_tick)
-        self.app.state_bus.subscribe(self._on_state_event)
+        self.app.state_bus.subscribe(self._on_state_event_safe)
 
     def _track(self, coro) -> asyncio.Task:
         self._tasks = [t for t in self._tasks if not t.done()]
@@ -238,7 +238,7 @@ class StoreScreen(Screen):
             self._filter_task.cancel()
         if self._stats_interval is not None:
             self._stats_interval.stop()
-        self.app.state_bus.unsubscribe(self._on_state_event)
+        self.app.state_bus.unsubscribe(self._on_state_event_safe)
 
     def on_resize(self, event):
         for section in ("tools", "search", "installed", "local"):
@@ -824,9 +824,23 @@ class StoreScreen(Screen):
 
     # ---------- state bus ----------
 
+    def _on_state_event_safe(self, kind: str, name: str, mgr: PackageManager, phase: str = "confirmed"):
+        """Marshal bus events onto the TUI event loop.
+
+        The background sync worker emits from a worker thread; Textual widget
+        updates and asyncio task creation must happen on the app loop.
+        """
+        try:
+            self.app.call_from_thread(self._on_state_event, kind, name, mgr, phase)
+        except Exception:
+            pass
+
     def _on_state_event(self, kind: str, name: str, mgr: PackageManager, phase: str = "confirmed"):
         if kind == "managers_changed":
             self._track(self._on_managers_changed())
+            return
+        if kind == self._ps.INSTALLED_REFRESH_EVENT:
+            self._track(self._do_load_installed())
             return
         if phase == "pending":
             self._register_pending(kind, name, mgr)

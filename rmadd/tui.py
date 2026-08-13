@@ -67,6 +67,7 @@ class RmaddTuiApp(App):
         self.package_service = package_service
         self.hardware_service = hardware_service
         self.state_bus = PackageStateBus()
+        self.package_service.set_state_bus(self.state_bus)
 
     def bell(self) -> None:
         """Silence all framework bells (CSS errors, restricted input, fatal errors)."""
