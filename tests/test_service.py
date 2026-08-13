@@ -1,5 +1,6 @@
 """Tests for the SWR installed-package cache and O(1) status lookup."""
 
+import json
 import os
 import time
 
@@ -32,6 +33,15 @@ class FakeAdapter:
 
 APT = PackageManager.APT
 FLATPAK = PackageManager.FLATPAK
+
+
+@pytest.fixture(autouse=True)
+def _isolate_disk_cache(tmp_path, monkeypatch):
+    """Point the on-disk cache at a per-test temp dir so tests never read or
+    write the real user cache, and each test starts from an empty cache."""
+    cache_dir = tmp_path / "xdg-cache"
+    monkeypatch.setenv("XDG_CACHE_HOME", str(cache_dir))
+    return cache_dir
 
 
 def _pkg(name, mgr):
@@ -267,3 +277,84 @@ def test_max_mtime_ignores_missing_paths(tmp_path):
     os.utime(b, (2_000_000, 2_000_000))
     assert PackageManagerService._max_mtime((str(a), str(b))) == 2_000_000
     assert PackageManagerService._max_mtime((str(a), str(b), str(tmp_path / "missing"))) == 2_000_000
+
+
+def test_cold_boot_loads_from_disk_cache():
+    svc1 = _service()
+    svc1.list_installed()
+    path = PackageManagerService._installed_disk_cache_path()
+    assert os.path.exists(path)
+
+    svc2 = _service()
+    result = svc2.list_installed()
+    assert {p.name for p in result} == {"htop", "git", "spotify"}
+    assert all(a.calls == 0 for a in svc2._sources.values())
+    assert svc2._installed_cache is not None
+
+
+def test_cold_boot_schedules_background_refresh():
+    svc = _service()
+    svc.list_installed()
+    svc2 = _service()
+    svc2.list_installed()
+    _wait_sync(svc2)
+    assert not svc2._is_syncing_installed
+
+
+def test_corrupted_disk_cache_falls_back():
+    path = PackageManagerService._installed_disk_cache_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        fh.write("{not valid json!!!")
+
+    svc = _service()
+    result = svc.list_installed()
+    assert {p.name for p in result} == {"htop", "git", "spotify"}
+    assert all(a.calls == 1 for a in svc._sources.values())
+
+
+def test_refresh_updates_disk_cache(monkeypatch):
+    svc = _service()
+    svc.list_installed()
+    _force_changed_mtimes(svc, monkeypatch)
+    ts, data = svc._installed_cache
+    svc._installed_cache = (ts - svc.INSTALLED_TTL - 1, data)
+
+    svc.list_installed()
+    _wait_sync(svc)
+
+    path = PackageManagerService._installed_disk_cache_path()
+    with open(path) as fh:
+        payload = json.load(fh)
+    assert payload["version"] == PackageManagerService.DISK_CACHE_VERSION
+    assert payload["mtimes"][APT.value] > 1.0
+    assert APT.value in payload["managers"]
+
+
+def test_disk_cache_load_skips_unregistered_managers():
+    svc = _service()
+    svc.list_installed()
+    payload = {
+        "version": PackageManagerService.DISK_CACHE_VERSION,
+        "saved_at": time.time(),
+        "mtimes": {APT.value: 1.0, "npm": 2.0},
+        "managers": {
+            APT.value: [
+                {"name": "htop", "version": "3.3.0", "manager": APT.value,
+                 "status": "installed"},
+            ],
+            "npm": [
+                {"name": "lodash", "version": "4.17.21", "manager": "npm",
+                 "status": "installed"},
+            ],
+        },
+    }
+    path = PackageManagerService._installed_disk_cache_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as fh:
+        json.dump(payload, fh)
+
+    svc = _service()
+    result = svc.list_installed()
+    assert {p.name for p in result} == {"htop"}
+    assert PackageManager.NPM not in svc._installed_names

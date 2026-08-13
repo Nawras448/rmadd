@@ -1,5 +1,6 @@
 """Aggregate package service with threaded querying and caching."""
 
+import json
 import os
 import threading
 import time
@@ -42,7 +43,15 @@ class PackageManagerService:
     COUNTS_TTL = 60
     INSTALLED_TTL = 60.0
     INSTALLED_REFRESH_EVENT = "installed_refreshed"
+    DISK_CACHE_VERSION = 1
     MAX_POOL_WORKERS = 8
+
+    @staticmethod
+    def _installed_disk_cache_path() -> str:
+        base = os.environ.get("XDG_CACHE_HOME") or os.path.join(
+            os.path.expanduser("~"), ".cache"
+        )
+        return os.path.join(base, "rmadd", "installed_cache.json")
 
     def __init__(self, sources: dict[PackageManager, BasePackageManager]):
         self._sources = sources
@@ -145,6 +154,116 @@ class PackageManagerService:
         }
         self._installed_mtimes = self._system_mtimes()
 
+    @staticmethod
+    def _package_to_dict(p: Package) -> dict:
+        return {
+            "name": p.name,
+            "version": p.version,
+            "arch": p.arch,
+            "repo": p.repo,
+            "size": p.size,
+            "summary": p.summary,
+            "status": p.status.value,
+            "manager": p.manager.value,
+        }
+
+    @classmethod
+    def _package_from_dict(cls, d: dict) -> Package:
+        return Package(
+            name=d.get("name", ""),
+            version=d.get("version", ""),
+            arch=d.get("arch", ""),
+            repo=d.get("repo", ""),
+            size=d.get("size", ""),
+            summary=d.get("summary", ""),
+            status=PackageStatus(d.get("status", PackageStatus.INSTALLED.value)),
+            manager=PackageManager(d.get("manager", PackageManager.DPKG.value)),
+        )
+
+    def _load_installed_disk_cache(self):
+        """Return (by_manager, mtimes) from the disk cache, or None on any failure.
+
+        Managers that are no longer registered are dropped so a stale snapshot
+        never resurrects a removed source.
+        """
+        try:
+            path = self._installed_disk_cache_path()
+            if not os.path.exists(path):
+                return None
+            with open(path) as fh:
+                data = json.load(fh)
+            if not isinstance(data, dict) or data.get("version") != self.DISK_CACHE_VERSION:
+                return None
+            by_manager: dict[PackageManager, PackageCollection] = {}
+            for key, entries in (data.get("managers") or {}).items():
+                try:
+                    mgr = PackageManager(key)
+                except ValueError:
+                    continue
+                if mgr not in self._sources or not isinstance(entries, list):
+                    continue
+                pkgs = [self._package_from_dict(e) for e in entries if isinstance(e, dict)]
+                by_manager[mgr] = PackageCollection(pkgs)
+            mtimes: dict[PackageManager, float] = {}
+            for key, value in (data.get("mtimes") or {}).items():
+                try:
+                    mtimes[PackageManager(key)] = float(value)
+                except (ValueError, TypeError):
+                    continue
+            if not by_manager:
+                return None
+            return by_manager, mtimes
+        except Exception:
+            return None
+
+    def _save_installed_disk_cache(self) -> None:
+        """Persist the current in-memory snapshot atomically (best-effort)."""
+        try:
+            with self._cache_lock:
+                cache = self._installed_cache
+                if cache is None:
+                    return
+                by_manager = cache[1]
+                mtimes = dict(self._installed_mtimes)
+            payload = {
+                "version": self.DISK_CACHE_VERSION,
+                "saved_at": cache[0],
+                "mtimes": {m.value: mt for m, mt in mtimes.items()},
+                "managers": {
+                    mgr.value: [self._package_to_dict(p) for p in col]
+                    for mgr, col in by_manager.items()
+                },
+            }
+            path = self._installed_disk_cache_path()
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = path + ".tmp"
+            with open(tmp, "w") as fh:
+                json.dump(payload, fh)
+            os.replace(tmp, path)
+        except Exception:
+            pass
+
+    def _try_load_disk_cache(self) -> bool:
+        """Populate the memory cache from disk on cold boot (idempotent)."""
+        with self._cache_lock:
+            if self._installed_cache is not None:
+                return False
+        loaded = self._load_installed_disk_cache()
+        if loaded is None:
+            return False
+        by_manager, mtimes = loaded
+        with self._cache_lock:
+            if self._installed_cache is not None:
+                return True
+            self._installed_cache = (time.monotonic(), by_manager)
+            self._installed_names = {
+                mgr: frozenset(p.name for p in col)
+                for mgr, col in by_manager.items()
+            }
+            self._installed_mtimes = mtimes
+        self._schedule_refresh()
+        return True
+
     def _schedule_refresh(self) -> None:
         """Submit a single background revalidation if none is already running."""
         with self._cache_lock:
@@ -186,6 +305,7 @@ class PackageManagerService:
             by_manager = self._fetch_all_installed()
             with self._cache_lock:
                 self._store_installed(by_manager)
+            self._save_installed_disk_cache()
         except Exception:
             pass
         finally:
@@ -206,6 +326,12 @@ class PackageManagerService:
             cache = self._installed_cache
             age = time.monotonic() - cache[0] if cache is not None else None
 
+        if cache is None:
+            self._try_load_disk_cache()
+            with self._cache_lock:
+                cache = self._installed_cache
+                age = time.monotonic() - cache[0] if cache is not None else None
+
         if manager:
             if cache is not None:
                 col = cache[1].get(manager)
@@ -222,6 +348,7 @@ class PackageManagerService:
             by_manager = self._fetch_all_installed()
             with self._cache_lock:
                 self._store_installed(by_manager)
+            self._save_installed_disk_cache()
             return self._fresh(PackageCollection(
                 self._dedup_local([p for col in by_manager.values() for p in col])
             ))
@@ -271,6 +398,14 @@ class PackageManagerService:
             return (
                 PackageStatus.INSTALLED if name in names else PackageStatus.AVAILABLE
             )
+        if not self._installed_names:
+            self._try_load_disk_cache()
+            with self._cache_lock:
+                names = self._installed_names.get(manager)
+            if names is not None:
+                return (
+                    PackageStatus.INSTALLED if name in names else PackageStatus.AVAILABLE
+                )
         try:
             return self._source(manager).get_status(name)
         except Exception:
