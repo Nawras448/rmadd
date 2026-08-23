@@ -1,3 +1,5 @@
+import asyncio
+
 from rich.text import Text
 from textual.containers import Vertical
 from textual.coordinate import Coordinate
@@ -20,6 +22,13 @@ MIN_TABLE_ROWS = 10
 _DIM_STATUSES = (PackageStatus.PENDING, PackageStatus.UPDATING)
 
 _RESIZE_DEBOUNCE_SECONDS = 0.12
+
+# Progressive population (M4 search responsiveness): very large collections
+# paint an immediate head slice, then an exclusive worker drains the rest in
+# chunks so the event loop never stalls on a single massive insert.
+_PROGRESSIVE_THRESHOLD = 800
+_IMMEDIATE_ROWS = 400
+_BULK_CHUNK = 300
 
 
 class ResponsiveMixin:
@@ -146,6 +155,9 @@ class PackageTable(ResponsiveMixin, Vertical):
         self._pkg_column_keys = list(self._active_indices)  # placeholder
         self._pkg_mode = False
         self._last_collection: PackageCollection | None = None
+        self._bulk_pending: list[tuple[str, list]] = []
+        self._bulk_gen = 0
+        self._last_prev: tuple = (None, -1)
 
     _table: DataTable
 
@@ -233,7 +245,30 @@ class PackageTable(ResponsiveMixin, Vertical):
             self._row_status = {}
         wanted = self._wanted_rows(collection)
         wanted_keys = [w[0] for w in wanted]
-        if self._pkg_mode and wanted_keys != self._row_keys:
+
+        progressive = bool(
+            self._pkg_mode and len(wanted) > _PROGRESSIVE_THRESHOLD
+        )
+        if progressive:
+            # Supersede any running bulk flush, paint the head instantly and
+            # stream the remainder through an exclusive batched worker.
+            self._bulk_gen += 1
+            self._bulk_pending = []
+            head = wanted[:_IMMEDIATE_ROWS]
+            self._reset_rows(head)
+            self._bulk_pending = wanted[_IMMEDIATE_ROWS:]
+            gen = self._bulk_gen
+            self._last_prev = (prev_key, prev_row)
+            try:
+                self.run_worker(
+                    self.drain_bulk(gen),
+                    group="bulk-" + str(id(self)),
+                    exclusive=True,
+                    thread=False,
+                )
+            except Exception:
+                self._drain_bulk_blocking()
+        elif self._pkg_mode and wanted_keys != self._row_keys:
             self._reconcile_rows(wanted)
         elif self._pkg_mode:
             for key, base in wanted:
@@ -245,6 +280,59 @@ class PackageTable(ResponsiveMixin, Vertical):
 
         self._apply_width(max(20, int(self._table.size.width)))
         self._restore_cursor(prev_key, prev_row)
+
+    def _reset_rows(self, wanted_head: list):
+        """Synchronous clean slate + immediate head insertion."""
+        dt = self._table
+        expected = len(self._active_indices)
+        if not self._pkg_mode or len(dt.columns) != expected:
+            dt.clear(columns=True)
+            self._build_columns(self._active_indices)
+            self._row_status = {}
+        else:
+            dt.clear()
+        self._row_keys = []
+        self._row_cells = {}
+        for key, base in wanted_head:
+            display = self._project(self._display_cells(key, base))
+            try:
+                dt.add_row(*display, key=key)
+            except Exception:
+                continue
+            self._row_keys.append(key)
+            self._row_cells[key] = list(base)
+
+    def _bulk_step(self) -> bool:
+        """Insert the next chunk of deferred rows. True when more remain."""
+        chunk = self._bulk_pending[:_BULK_CHUNK]
+        del self._bulk_pending[:_BULK_CHUNK]
+        dt = self._table
+        for key, base in chunk:
+            display = self._project(self._display_cells(key, base))
+            try:
+                dt.add_row(*display, key=key)
+            except Exception:
+                continue
+            self._row_keys.append(key)
+            self._row_cells[key] = list(base)
+        if not self._bulk_pending:
+            self._tune_widths(max(20, int(self._table.size.width)))
+            self._restore_cursor(*self._last_prev)
+        return bool(self._bulk_pending)
+
+    def _drain_bulk_blocking(self):
+        """Deterministic flush (tests / no-worker fallback)."""
+        gen = self._bulk_gen
+        while self._bulk_pending and self._bulk_gen == gen:
+            self._bulk_step()
+
+    async def drain_bulk(self, gen: int):
+        """Exclusive worker body: batch each chunk, yield between them."""
+        while self._bulk_pending and self._bulk_gen == gen:
+            async with self._table.batch():
+                more = self._bulk_step()
+            if more:
+                await asyncio.sleep(0)
 
     def _write_row(self, key: str, base: list):
         """Persist base cells and push their current display rendering."""

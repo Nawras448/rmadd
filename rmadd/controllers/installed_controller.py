@@ -20,7 +20,7 @@ class InstalledController(Controller):
         self.busy = False
         self.loaded = False
         self.loaded_at = 0.0
-        self._filter_task: asyncio.Task | None = None
+        self._latest_filter_query = ""
 
     # ------------------------------------------------------------- loading --
 
@@ -72,35 +72,60 @@ class InstalledController(Controller):
         self.update_actions()
 
     def apply_filter(self, query: str):
-        q = query.strip().lower()
-        collection = PackageCollection(self.ui.opt.installed_packages())
-        if self.managers_filter:
-            collection = collection.by_managers(self.managers_filter)
-        if q:
-            collection = collection.search(q)
+        collection = self._match(
+            self.ui.opt.installed_packages(), query, self.managers_filter
+        )
         self.show(collection)
 
     def refresh_view(self):
         query = self.ui.query_one("#installed-input", Input).value
         self.apply_filter(query)
 
-    def schedule_filter(self, query: str):
-        if self._filter_task and not self._filter_task.done():
-            self._filter_task.cancel()
-        self._filter_task = asyncio.create_task(self._delayed_filter(query))
+    _FILTER_DEBOUNCE_SECONDS = 0.15
+    _THREAD_FILTER_MIN_ROWS = 2000
 
-    async def _delayed_filter(self, query: str):
+    def schedule_filter(self, query: str):
+        """Debounced filter: exclusive worker => only the final keystroke runs."""
+        self._latest_filter_query = query
+        self.ui.run_worker_ex(
+            self._filter_pipeline(query), group="installed-filter"
+        )
+
+    async def _filter_pipeline(self, query: str):
         try:
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(self._FILTER_DEBOUNCE_SECONDS)
         except asyncio.CancelledError:
             return
         if not self.ui.is_mounted:
             return
-        self.apply_filter(query)
+        packages = self.ui.opt.installed_packages()
+        if len(packages) >= self._THREAD_FILTER_MIN_ROWS:
+            # Heavy dataset: match off-loop, apply back on the UI thread.
+            result = await asyncio.to_thread(
+                self._match, packages, query, self.managers_filter
+            )
+            if query != self._latest_filter_query or not self.ui.is_mounted:
+                return
+            self.show(result)
+        else:
+            self.apply_filter(query)
+
+    @staticmethod
+    def _match(packages, query: str, managers_filter):
+        """Pure in-memory matcher (never touches package managers)."""
+        ql = query.strip().lower()
+        out = []
+        for p in packages:
+            if managers_filter and p.manager not in managers_filter:
+                continue
+            if ql and ql not in p.name.lower() and ql not in (p.summary or "").lower():
+                continue
+            out.append(p)
+        return PackageCollection(out)
 
     def cancel_filter(self):
-        if self._filter_task and not self._filter_task.done():
-            self._filter_task.cancel()
+        self._latest_filter_query = ""
+        self.ui.cancel_worker_group("installed-filter")
 
     # ------------------------------------------------------------ tab strip --
 

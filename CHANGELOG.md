@@ -22,6 +22,14 @@ adheres to [Semantic Versioning](https://semver.org/).
   `rmadd` package (`rmadd/style.tcss`), `CSS_PATH` made package-relative,
   and the file bundled via setuptools package-data.
 
+### Performance
+- Search/filter responsiveness: debounced live-search (200 ms) and
+  installed-filter (150 ms) run as exclusive Textual workers, so only the
+  final keystroke executes; installed matching off-loads to a worker thread
+  for datasets >= 2 000 packages; very large result tables paint an
+  immediate head slice then stream the remainder in batched chunks
+  (`DataTable.batch()`), keeping the UI fluid while typing.
+
 ### Added
 - `[project.scripts]` entry point (`rmadd`) in `pyproject.toml`.
 - Hardened `install.sh`: prerequisite checks for `python3`,

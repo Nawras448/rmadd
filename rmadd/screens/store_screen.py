@@ -179,6 +179,16 @@ class StoreScreen(Screen):
     def active_section(self) -> str:
         return self._active_section
 
+    def run_worker_ex(self, coro, group: str, *, thread: bool = False):
+        """Exclusive Textual worker: a new worker in `group` cancels the old."""
+        return self.run_worker(coro, group=group, exclusive=True, thread=thread)
+
+    def cancel_worker_group(self, group: str):
+        try:
+            self.workers.cancel_group(self, group)
+        except Exception:
+            pass
+
     def track(self, coro) -> asyncio.Task:
         self._tasks = [t for t in self._tasks if not t.done()]
         task = asyncio.create_task(coro)

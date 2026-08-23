@@ -16,7 +16,6 @@ class SearchController(Controller):
         self.managers: set[PackageManager] | None = None
         self.query: str = ""
         self._gen = 0
-        self._debounce_task: asyncio.Task | None = None
 
     @property
     def generation(self) -> int:
@@ -125,30 +124,41 @@ class SearchController(Controller):
 
     # ----------------------------------------------------------- debounce --
 
+    _LIVE_DEBOUNCE_SECONDS = 0.2
+
     def schedule_live(self, query: str):
-        if self._debounce_task and not self._debounce_task.done():
-            self._debounce_task.cancel()
-        self._debounce_task = asyncio.create_task(self._delayed_search(query))
+        """Debounced live search; exclusive worker cancels superseded waits."""
+        self.ui.run_worker_ex(
+            self._delayed_search(query), group="search-live"
+        )
 
     async def _delayed_search(self, query: str):
         try:
-            await asyncio.sleep(0.25)
+            await asyncio.sleep(self._LIVE_DEBOUNCE_SECONDS)
         except asyncio.CancelledError:
             return
         await self.run(query, self.managers)
 
     def cancel_debounce(self):
-        if self._debounce_task and not self._debounce_task.done():
-            self._debounce_task.cancel()
+        """Cancel the pending debounced run and any in-flight fan-out."""
+        self.ui.cancel_worker_group("search-live")
+        self.ui.cancel_worker_group("search-run")
 
     def submitted(self, value: str):
         """Enter in the search box bypasses the debounce."""
         self.cancel_debounce()
-        self.track(self.run(value, self.managers))
+        self.start_run(value)
+
+    def start_run(self, query: str, managers=None):
+        """Run a search as an exclusive worker (superseded runs cancel)."""
+        self.ui.run_worker_ex(
+            self.run(query, managers if managers is not None else self.managers),
+            group="search-run",
+        )
 
     def rerun_current(self):
         if self.query:
-            self.track(self.run(self.query, self.managers))
+            self.start_run(self.query, self.managers)
 
     # ------------------------------------------------------------ tab strip --
 
@@ -176,9 +186,8 @@ class SearchController(Controller):
             self.managers = None
         else:
             self.managers = {PackageManager((tab_id or "").removeprefix("tab-"))}
-        self.cancel_debounce()
         current = self.ui.query_one("#search-input", Input).value
-        self.track(self.run(current, self.managers))
+        self.start_run(current)
 
     # -------------------------------------------------------- action bar --
 
