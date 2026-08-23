@@ -1,9 +1,10 @@
 """YarnAdapter adapter."""
 
 import re
-from typing import Optional
-from rmadd.models import Package, PackageManager, PackageStatus, Repo
+
+from rmadd.models import Package, PackageManager
 from rmadd.package_managers.base import BaseAdapter
+
 
 class Adapter(BaseAdapter):
     def __init__(self):
@@ -27,7 +28,7 @@ class Adapter(BaseAdapter):
                 pkgs.append(Package(name=m.group(1), manager=self._manager))
         return pkgs
 
-    def get_info(self, name: str) -> Optional[Package]:
+    def get_info(self, name: str) -> Package | None:
         return Package(name=name, manager=self._manager)
 
     def count(self) -> int:

@@ -1,10 +1,10 @@
 import asyncio
 import os
-from typing import Callable, Optional
+from collections.abc import Callable
 
-from textual.screen import Screen
-from textual.widgets import Header, Footer, Static, Button, DirectoryTree
 from textual.containers import Horizontal, Vertical
+from textual.screen import Screen
+from textual.widgets import Button, DirectoryTree, Footer, Header, Static
 
 
 class AppImageInstallScreen(Screen):
@@ -12,11 +12,11 @@ class AppImageInstallScreen(Screen):
 
     BINDINGS = [("escape", "dismiss", "Back")]
 
-    def __init__(self, package_service, on_finish: Optional[Callable] = None):
+    def __init__(self, package_service, on_finish: Callable | None = None):
         super().__init__()
         self._ps = package_service
         self._on_finish = on_finish
-        self._selected: Optional[str] = None
+        self._selected: str | None = None
         self._busy = False
 
     def compose(self):

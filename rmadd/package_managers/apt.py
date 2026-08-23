@@ -1,16 +1,17 @@
 """AptAdapter adapter."""
 
-import os
-from typing import Optional
-from rmadd.models import Package, PackageManager, PackageStatus, Repo
+
+from rmadd.models import Package, PackageManager, Repo
 from rmadd.package_managers.base import BaseAdapter
+
 
 class Adapter(BaseAdapter):
     def __init__(self):
         super().__init__(PackageManager.APT)
 
     def list_installed(self) -> list:
-        out = self._run(["dpkg-query", "-f", "${binary:Package}|${Version}|${Architecture}|${binary:Summary}\n", "-W"], timeout=60)
+        fmt = "${binary:Package}|${Version}|${Architecture}|${binary:Summary}\n"
+        out = self._run(["dpkg-query", "-f", fmt, "-W"], timeout=60)
         pkgs = []
         for line in out.split("\n"):
             parts = line.split("|")
@@ -29,7 +30,7 @@ class Adapter(BaseAdapter):
                 pkgs.append(Package(name=name.strip(), summary=rest.strip(), manager=self._manager))
         return pkgs
 
-    def get_info(self, name: str) -> Optional[Package]:
+    def get_info(self, name: str) -> Package | None:
         out = self._run(["apt-cache", "show", name])
         if not out:
             return None

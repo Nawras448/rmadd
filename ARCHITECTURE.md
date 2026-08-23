@@ -9,7 +9,7 @@ Everything lives in the `rmadd/` package plus a thin `main.py` entry point.
 | File | Role |
 |---|---|
 | `main.py` | Builds the three services directly (no DI container), dispatches to tui/cli via `config.ui_mode`. |
-| `rmadd/config.py` | JSON config at `~/.config/rmadd/config.json` (`ui.mode`: tui or cli). |
+| `rmadd/config.py` | JSON config at `~/.config/rmadd/config.json` (`ui.mode`: tui or cli; `package_managers.op_timeout_seconds`: execution budget; `ui.confirm_removal`: opt-in removal confirmation). |
 | `rmadd/logging.py` | Logs to `~/.local/share/rmadd/logs/app.log`. |
 | `rmadd/state.py` | `PackageStateBus` - app-wide pub/sub bus. |
 
@@ -18,23 +18,46 @@ Everything lives in the `rmadd/` package plus a thin `main.py` entry point.
 | File | Role |
 |---|---|
 | `rmadd/tui.py` | `RmaddTuiApp` - root App, cyberpunk theme, mounts StoreScreen, owns state bus. |
-| `rmadd/screens/store_screen.py` | `StoreScreen` - one TabbedContent screen (Tools/Search/Installed/Local/About). |
+| `rmadd/screens/store_screen.py` | `StoreScreen` - composition root: layout (Tools/Search/Installed/Local/About), bindings, event routing; delegates behavior to controllers. |
 | `rmadd/screens/widgets/package_table.py` | `PackageTable` + `apply_pane_floor()` sizing. |
 | `rmadd/screens/widgets/tools_table.py` | `ToolsTable` widget. |
 | `rmadd/screens/widgets/system_card.py` | `SystemCard` (About tab). |
 | `rmadd/screens/install_progress_screen.py` | `InstallProgressScreen` modal (progress, ETA, cancel, emits bus events). |
 | `rmadd/screens/package_detail_screen.py` | `PackageDetailScreen` modal. |
 | `rmadd/screens/appimage_install_screen.py` | `AppImageInstallScreen` file picker. |
+| `rmadd/screens/help_overlay.py` | `?` keybinding overlay (`ModalScreen`). |
+| `rmadd/screens/confirm_remove.py` | Opt-in removal confirmation modal (y/n). |
+| `rmadd/screens/op_feedback.py` | `OpResult` -> toast severity/message + result-pane markup. |
 | `style.tcss` | Textual CSS stylesheet (root). |
+
+Package/tools tables embed a `ResponsiveMixin`: trailing-edge debounced
+resize with width-tiered column hiding, cursor-locked profile switches and
+keyed reconciliation (M3 Step 1/3).
+
+### Controllers (`rmadd/controllers/`)
+
+| File | Role |
+|---|---|
+| `optimistic_state.py` | Pure optimistic state machine (zero UI imports): installed set/lists, pending ops with pre-op snapshots, removal stash; register/settle/revert return plain deltas. |
+| `operations_controller.py` | Owns the state machine; translates bus events into widget updates; start/settle/revert orchestration + manager rediscovery. |
+| `search_controller.py` | Debounced live search fan-out, version enrichment, dynamic action bar. |
+| `installed_controller.py` | Service hydration, filtering, per-manager tab strip, 15 s stale reload. |
+| `local_binaries_controller.py` | Lazy LOCAL scanner adapter, scan/render of the Local tab. |
+| `tools_controller.py` | Installer-tool catalog actions + AppImage install flow. |
+| `stats_controller.py` | System card + counts rendering; fast in-memory count patching. |
+| `base.py` | `Controller` base wiring a controller to its host screen. |
+
+Sibling coordination is late-bound through the screen (`ui.<controller>`); the
+screen owns task tracking (`track`), bus subscription and thread marshalling.
 
 ### Core logic
 
 | File | Role |
 |---|---|
 | `rmadd/models.py` | `PackageManager` enum (27), tier metadata, `Package`, `PackageCollection`, `SystemInfo`, hardware dataclasses. |
-| `rmadd/package_managers/base.py` | `BaseAdapter` (shared runner, privilege handling), `discover_managers()`, `resolve_system_manager()`. |
+| `rmadd/package_managers/base.py` | `BaseAdapter` (streaming runner: `OpResult` failure contexts, two-phase auth/execution deadlines, pgid-directed cleanup, pkexec→sudo fallback), `OpReport` batch aggregate, runtime execution-timeout override, discovery registry. |
 | `rmadd/package_managers/<mgr>.py` | One module per manager (apt, dnf, flatpak, snap, pip, ...). |
-| `rmadd/package_managers/service.py` | `PackageManagerService` - search/install/counts, thread pool, TTL caches. |
+| `rmadd/package_managers/service.py` | `PackageManagerService` - search/install/counts, thread pool, TTL caches, batch runner (`run_batch`/`batch_update_all` → `OpReport`), dual named long-lived pools + `shutdown()`. |
 | `rmadd/package_managers/local.py` | `LocalBinaryScanner` (opt-in PATH scan). |
 | `rmadd/system_info.py` | `SystemDataSource`, `HostnamectlAdapter`, `SystemInfoService`. |
 | `rmadd/hardware.py` | `HardwareDataSource`, `ProcFsAdapter` (CPU/mem/disk/GPU/network), `HardwareMonitorService`. |
@@ -59,15 +82,25 @@ main.py
 1. **Read path (off the UI thread):** StoreScreen calls services via
    `asyncio.to_thread`. PackageManagerService fans out to a ThreadPoolExecutor,
    merges results, caches counts and searches.
-2. **Write/op path:** key/button action -> StoreScreen `_start_operation`
-   (emits `phase="pending"` on the bus) -> `InstallProgressScreen` ->
-   `package_service.install/remove/update` -> adapter `_run_stream()` (cancel
-   via threading.Event) -> emits `"confirmed"` or `"reverted"` on completion.
-3. **Refresh path:** `state_bus.emit(kind, name, mgr)` -> StoreScreen
-   `_on_state_event` -> updates installed set, invalidates counts, re-runs
-   search, reloads stats, triggers `_rediscover_managers()`.
+2. **Write/op path:** key/button action -> StoreScreen `_do_pkg_action` ->
+   `OperationsController.start` (emits `phase="pending"` on the bus) ->
+   `InstallProgressScreen` -> `package_service.install/remove/update` ->
+   adapter `run_stream()` returning an `OpResult` (cancel via threading.Event;
+   auth vs execution deadlines) -> emits `"confirmed"` or `"reverted"` on
+   completion.
+3. **Refresh path:** `state_bus.emit(kind, name, mgr)` -> screen marshals to
+   `OperationsController.on_bus_event` (same-thread inline, worker-thread via
+   `call_from_thread`) -> updates installed set, invalidates counts, re-runs
+   search, reloads stats, triggers rediscovery.
 4. **Background:** StoreScreen starts a 5s interval for stats; local scan and
    live search are lazy/debounced.
+5. **Focus pipeline:** every modal is pushed through `StoreScreen.push_modal`,
+   which snapshots the focused widget and restores it on dismissal (falling
+   back to the active section's primary widget); progress panels grab their
+   Cancel button immediately.
+6. **Removal safety valve:** when `ui.confirm_removal` is enabled,
+   `_do_pkg_action` routes removals through `ConfirmRemoveScreen`; declines
+   are surfaced as a cancelled label and never touch state.
 
 ## 3. Gotchas & going forward
 
@@ -80,7 +113,7 @@ main.py
   subclass of `BaseAdapter`; 3) register the module. Register modules discovered
   automatically via `discover_managers()`.
 - **Debugging:** logs at `~/.local/share/rmadd/logs/app.log`; StoreScreen owns
-  `_track`/`on_unmount` for background tasks; force refresh via `r`.
+   `_track`/`on_unmount` for background tasks; force refresh via `R`.
 - All bindings live in `rmadd/tui.py`.
 
 ## 4. Package state bus
@@ -93,16 +126,18 @@ defaults to `"confirmed"` for backward compatibility.
 
 | kind             | name | mgr            | phase           | Emitter                                            |
 |------------------|------|----------------|-----------------|----------------------------------------------------|
-| install          | pkg  | manager        | pending         | StoreScreen `_start_operation` / PackageDetailScreen |
+| install          | pkg  | manager        | pending         | OperationsController.start / PackageDetailScreen |
 | install/remove/update | pkg | manager    | confirmed       | InstallProgressScreen on success                   |
 | install/remove/update | pkg | manager    | reverted        | InstallProgressScreen on failure/cancel            |
 | install          | pkg  | APPIMAGE       | confirmed       | StoreScreen (AppImage install path)                |
-| managers_changed | ""   | None           | (n/a)           | StoreScreen `_rediscover_managers()`               |
+| managers_changed | ""   | None           | (n/a)           | OperationsController.rediscover_managers()         |
 
-StoreScreen owns the optimistic lifecycle: `pending` writes straight into the
-in-memory installed set (`_register_pending`), `confirmed` settles it
-(`_settle_confirmed`) and `reverted` undoes it in-memory without a rescan
-(`_revert_pending`).
+OperationsController owns the optimistic lifecycle, backed by the pure
+`OptimisticPackageState`: `pending` writes straight into the in-memory
+installed set (`register_pending`, keeping a pre-op snapshot), `confirmed`
+settles it (`settle_confirmed`) and `reverted` undoes exactly what the op
+changed (`revert_pending` restores removed rows verbatim at their original
+index; installs of pre-existing packages survive) — all without a rescan.
 
 ### Optimistic lifecycle: Action Trigger -> Memory Mutation -> Subprocess Exec
 -> Confirm/Revert
@@ -150,7 +185,10 @@ user — rather than by a blocking modal.
   the package state and the manager's `supports()` allow; `_run_action`
   re-guards install/remove/update and refreshes state after each op.
 
-Subscribers: StoreScreen `_on_state_event` (mounted/unmounted with the screen).
+Subscribers: StoreScreen `_on_state_event_safe` marshals every event onto the
+app loop (inline when already on it, `call_from_thread` from worker threads)
+into `OperationsController.on_bus_event`; subscribed/unsubscribed with the
+screen's mount cycle.
 
 This is the only reactive channel the UI uses: op paths must end with
 `app.state_bus.emit(action, name, mgr, phase)` or the Installed tab will not

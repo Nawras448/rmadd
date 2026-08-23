@@ -1,20 +1,70 @@
-from textual.widgets import DataTable
 from textual.containers import Vertical
+from textual.widgets import DataTable
 
-from rmadd.screens.widgets.package_table import apply_pane_floor
+from rmadd.screens.widgets.package_table import (
+    ResponsiveMixin,
+    apply_pane_floor,
+)
 
 
-class ToolsTable(Vertical):
+class ToolsTable(ResponsiveMixin, Vertical):
     can_focus = False
+
+    _COL_LABELS = ("", "Tool", "Status", "Purpose")
+    _RESPONSIVE_TIERS = (
+        (78, (0, 1, 2, 3)),
+        (0, (0, 1, 2)),
+    )
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._row_keys: list[str] = []
         self._row_cells: dict[str, list] = {}
+        self._init_responsive(len(self._COL_LABELS))
+        self._pkg_column_keys = None
+        self._cols_ready = False
+
+    _table: DataTable
 
     def compose(self):
         self._table = DataTable(id="inner-tools-table", cursor_type="row", show_cursor=True, show_row_labels=False)
         yield self._table
+
+    def _capture_cursor(self):
+        try:
+            coord = self._table.cursor_coordinate
+            if coord is None or self._table.row_count == 0:
+                return (None, -1)
+            return (self._table.coordinate_to_cell_key(coord).row_key.value, coord.row)
+        except Exception:
+            return (None, -1)
+
+    def _restore_cursor(self, prev_key, prev_row: int):
+        count = self._table.row_count
+        if count == 0:
+            return
+        target = None
+        if prev_key:
+            try:
+                target = self._table.get_row_index(prev_key)
+            except Exception:
+                target = None
+        if target is None or not 0 <= target < count:
+            base = prev_row if isinstance(prev_row, int) and prev_row >= 0 else 0
+            target = min(base, count - 1)
+        try:
+            from textual.coordinate import Coordinate
+
+            self._table.cursor_coordinate = Coordinate(target, 0)
+        except Exception:
+            pass
+
+    def _project(self, display: list) -> list:
+        return [display[i] for i in self._active_indices]
+
+    def _display_cells(self, key: str, base: list) -> list:
+        """No status overrides on the tools table."""
+        return list(base)
 
     def _wanted_rows(self, entries: list) -> list:
         wanted = []
@@ -25,11 +75,10 @@ class ToolsTable(Vertical):
         return wanted
 
     def show_tools(self, entries: list):
-        if len(self._table.columns) != 4:
+        expected = len(self._active_indices)
+        if not self._cols_ready or len(self._table.columns) != expected:
             self._table.clear(columns=True)
-            self._add_tool_columns()
-            self._row_keys = []
-            self._row_cells = {}
+            self._rebuild_columns(self._active_indices, 80)
         wanted = self._wanted_rows(entries)
         wanted_keys = [w[0] for w in wanted]
         if wanted_keys == self._row_keys:
@@ -37,25 +86,44 @@ class ToolsTable(Vertical):
                 stored = self._row_cells.get(key)
                 if stored and stored != cells:
                     try:
-                        for col, value in enumerate(cells):
-                            self._table.update_cell(key, col, value)
+                        for col_key, value in zip(self._pkg_column_keys, self._project(cells)):
+                            self._table.update_cell(key, col_key, value)
                     except Exception:
                         pass
-                    self._row_cells[key] = cells
-        elif len(self._table.columns) == 4:
+                    self._row_cells[key] = list(cells)
+        elif self._cols_ready and len(self._table.columns) == expected:
             self._table.clear()
             self._row_keys = []
             self._row_cells = {}
             for key, cells in wanted:
-                self._table.add_row(*cells, key=key)
+                try:
+                    self._table.add_row(*self._project(cells), key=key)
+                except Exception:
+                    continue
                 self._row_keys.append(key)
                 self._row_cells[key] = list(cells)
         else:
             return
-        self._fit_columns(self._table.size.width)
+        self._tune_widths(self._table.size.width)
 
-    def on_resize(self, event):
-        self._fit_columns(event.size.width)
+    def _rebuild_columns(self, indices: tuple[int, ...], width: int):
+        dt = self._table
+        rows = [(k, self._row_cells[k]) for k in list(self._row_keys)]
+        dt.clear(columns=True)
+        widths = self._tool_widths(max(20, int(width)))
+        for i in indices:
+            dt.add_column(self._COL_LABELS[i], width=max(1, widths[i]))
+        self._active_indices = tuple(indices)
+        self._pkg_column_keys = list(dt.columns.keys())
+        self._cols_ready = True
+        for key, base in rows:
+            try:
+                dt.add_row(*self._project(base), key=key)
+            except Exception:
+                pass
+
+    def _flush_resize(self):
+        super()._flush_resize()
         apply_pane_floor(self)
 
     def _tool_widths(self, width):
@@ -65,15 +133,15 @@ class ToolsTable(Vertical):
         purpose_w = max(10, available - 1 - tool_w - status_w)
         return (1, tool_w, status_w, purpose_w)
 
-    def _fit_columns(self, width):
+    def _tune_widths(self, width: int):
         dt = self._table
-        if len(dt.columns) < 4:
+        if not self._cols_ready:
             return
-        for col, w in zip(dt.columns.values(), self._tool_widths(width)):
-            col.width = w
-        dt.refresh()
-
-    def _add_tool_columns(self):
-        labels = ("", "Tool", "Status", "Purpose")
-        for label, w in zip(labels, self._tool_widths(self._table.size.width)):
-            self._table.add_column(label, width=w)
+        widths = self._tool_widths(max(20, int(width)))
+        subset = [widths[i] for i in self._active_indices]
+        try:
+            for col_key, w in zip(self._pkg_column_keys, subset):
+                dt.columns[col_key].width = w
+            dt.refresh()
+        except Exception:
+            pass

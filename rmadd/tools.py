@@ -1,6 +1,5 @@
 import shutil
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, replace
 
 from rmadd.models import PackageManager
 from rmadd.package_managers.base import resolve_system_manager
@@ -12,7 +11,7 @@ class InstallerTool:
     display: str
     binary: str
     purpose: str
-    manager: Optional[PackageManager] = None
+    manager: PackageManager | None = None
 
 
 INSTALLER_TOOLS: list[InstallerTool] = [
@@ -37,8 +36,10 @@ INSTALLER_TOOLS: list[InstallerTool] = [
 
 def detect_tools() -> list:
     system = resolve_system_manager()
-    entries = []
-    for tool in INSTALLER_TOOLS:
-        tool.manager = tool.manager or system
-        entries.append((tool, shutil.which(tool.binary) is not None))
-    return entries
+    return [
+        (
+            replace(tool, manager=tool.manager or system),
+            shutil.which(tool.binary) is not None,
+        )
+        for tool in INSTALLER_TOOLS
+    ]

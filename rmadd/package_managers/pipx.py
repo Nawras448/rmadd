@@ -1,9 +1,10 @@
 """PipxAdapter adapter."""
 
 import json
-from typing import Optional
-from rmadd.models import Package, PackageManager, PackageStatus, Repo
+
+from rmadd.models import Package, PackageManager
 from rmadd.package_managers.base import BaseAdapter
+
 
 class Adapter(BaseAdapter):
     def __init__(self):
@@ -22,7 +23,7 @@ class Adapter(BaseAdapter):
             pass
         return pkgs
 
-    def get_info(self, name: str) -> Optional[Package]:
+    def get_info(self, name: str) -> Package | None:
         out = self._run(["pipx", "list", "--json"])
         try:
             data = json.loads(out)
@@ -44,11 +45,11 @@ class Adapter(BaseAdapter):
             import xmlrpc.client
             socket.setdefaulttimeout(10)
             proxy = xmlrpc.client.ServerProxy("https://pypi.org/pypi")
-            for hit in proxy.search({"name": query}, "or")[:20]:
+            for hit in proxy.search({"name": query}, "or")[:20]:  # type: ignore[index]
                 pkgs.append(Package(
-                    name=hit.get("name", ""),
-                    version=str(hit.get("latest_version") or ""),
-                    summary=str(hit.get("summary") or ""),
+                    name=hit.get("name", ""),  # type: ignore[union-attr]
+                    version=str(hit.get("latest_version") or ""),  # type: ignore[union-attr]
+                    summary=str(hit.get("summary") or ""),  # type: ignore[union-attr]
                     manager=self._manager,
                 ))
         except Exception:

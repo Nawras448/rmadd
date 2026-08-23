@@ -4,13 +4,15 @@ import queue
 import re
 import threading
 import time
-from typing import Callable, Optional
+from collections.abc import Callable
 
-from textual.screen import Screen
-from textual.widgets import Header, Footer, Static, Button, ProgressBar, RichLog
 from textual.containers import Horizontal, Vertical
+from textual.screen import Screen
+from textual.widgets import Button, Footer, Header, ProgressBar, RichLog, Static
 
 from rmadd.models import PackageManager
+from rmadd.package_managers.base import FailureReason, OpResult
+from rmadd.screens.op_feedback import is_auth_prompt
 
 
 class InstallProgressScreen(Screen):
@@ -35,9 +37,9 @@ class InstallProgressScreen(Screen):
         action: str,
         name: str,
         manager: PackageManager,
-        on_finish: Optional[Callable[[str, str, PackageManager, bool, bool], None]] = None,
+        on_finish: Callable[[str, str, PackageManager, bool, bool, bool, OpResult | None], None] | None = None,
         section: str = "",
-        executor: Optional[Callable] = None,
+        executor: Callable | None = None,
     ):
         super().__init__()
         self._ps = package_service
@@ -52,9 +54,11 @@ class InstallProgressScreen(Screen):
         self._start = time.monotonic()
         self._done = False
         self._pct = 0.0
-        self._real_pct: Optional[float] = None
+        self._real_pct: float | None = None
         self._tick_timer = None
         self._eta_timer = None
+        self._auth_seen = False
+        self._title_base = ""
 
     def compose(self):
         yield Header(show_clock=True)
@@ -69,9 +73,14 @@ class InstallProgressScreen(Screen):
         yield Footer()
 
     def on_mount(self):
-        self.query_one("#progress-title", Static).update(
-            self.TITLE_LABELS[self._action].format(name=self._name, mgr=self._mgr.value)
+        self._title_base = self.TITLE_LABELS[self._action].format(
+            name=self._name, mgr=self._mgr.value
         )
+        self.query_one("#progress-title", Static).update(self._title_base)
+        try:
+            self.query_one("#btn-progress-cancel", Button).focus()
+        except Exception:
+            pass
         self._tick_timer = self.set_interval(0.05, self._drain_queue)
         self._eta_timer = self.set_interval(0.5, self._update_eta)
         self._update_eta()
@@ -79,28 +88,48 @@ class InstallProgressScreen(Screen):
 
     # ---------- operation ----------
 
+    _RESULT_METHODS = {
+        "install": "install_result",
+        "remove": "remove_result",
+        "update": "update_result",
+    }
+
     async def _run(self):
         try:
             if self._executor is not None:
                 ok = await asyncio.to_thread(
                     self._executor, self._name, self._mgr, self._queue.put, self._cancel_event
                 )
-            else:
-                method = getattr(self._ps, self._action)
-                ok = await asyncio.to_thread(
-                    method, self._name, self._mgr, None, self._queue.put, self._cancel_event
+                cancelled = self._cancel_event.is_set()
+                result = OpResult(
+                    ok=bool(ok),
+                    cancelled=cancelled and not ok,
+                    reason=(
+                        FailureReason.NONE
+                        if ok
+                        else (FailureReason.CANCELLED if cancelled else FailureReason.FAILED)
+                    ),
                 )
-            self._finish(ok)
+            else:
+                method = getattr(self._ps, self._RESULT_METHODS[self._action])
+                result = await asyncio.to_thread(
+                    method,
+                    self._name,
+                    self._mgr,
+                    on_output=self._queue.put,
+                    cancel_event=self._cancel_event,
+                )
+            self._finish(result)
         except Exception as e:
             self._queue.put(f"Error: {e}\n")
-            self._finish(False)
+            self._finish(OpResult(False, reason=FailureReason.FAILED, tail=str(e)))
 
     def _emit(self, phase: str):
         bus = getattr(self.app, "state_bus", None)
         if bus is not None and self._action in ("install", "remove", "update"):
             bus.emit(self._action, self._name, self._mgr, phase)
 
-    def _finish(self, ok: bool):
+    def _finish(self, result: OpResult):
         if self._done:
             return
         self._done = True
@@ -110,6 +139,7 @@ class InstallProgressScreen(Screen):
             self._eta_timer.stop()
         bar = self.query_one("#progress-bar", ProgressBar)
         bar.update(total=100, progress=100)
+        ok = result.ok
         if ok:
             self._queue.put("Done.\n")
             self._emit("confirmed")
@@ -117,11 +147,19 @@ class InstallProgressScreen(Screen):
             self._queue.put("Operation cancelled.\n")
             self._emit("reverted")
         else:
-            self._queue.put("Operation failed.\n")
+            self._queue.put(f"Operation failed: {result.describe()}\n")
             self._emit("reverted")
         self._drain_queue()
         if self._on_finish is not None:
-            self._on_finish(self._action, self._section, self._name, self._mgr, ok, self._cancel_event.is_set())
+            self._on_finish(
+                self._action,
+                self._section,
+                self._name,
+                self._mgr,
+                ok,
+                self._cancel_event.is_set(),
+                result,
+            )
         self.set_timer(1.5, self._schedule_dismiss)
 
     def _schedule_dismiss(self):
@@ -158,6 +196,14 @@ class InstallProgressScreen(Screen):
             lowered = line.lower()
             if any(k in lowered for k in ("unpacking", "preparing", "configuring", "running postinstall")):
                 self._pct = max(self._pct, 75.0)
+            if not self._auth_seen and is_auth_prompt(line):
+                self._auth_seen = True
+                try:
+                    self.query_one("#progress-title", Static).update(
+                        f"{self._title_base} — [yellow]awaiting authentication[/yellow]"
+                    )
+                except Exception:
+                    pass
         self.query_one("#progress-console", RichLog).write("".join(lines).rstrip("\n"))
 
     def _update_eta(self):

@@ -1,8 +1,8 @@
 """Shared data models: package metadata/state, system info, and hardware metrics."""
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, Callable
 
 
 class PackageManager(str, Enum):
@@ -309,7 +309,7 @@ class Repo:
 class PackageCollection:
     """Ordered, filterable snapshot of Package objects shared across views."""
 
-    def __init__(self, packages: Optional[List[Package]] = None):
+    def __init__(self, packages: list[Package] | None = None):
         self._packages = packages or []
 
     def __len__(self) -> int:
@@ -335,14 +335,8 @@ class PackageCollection:
             lambda p: q in p.name.lower() or q in (p.summary or "").lower()
         )
 
-    def to_list(self) -> List[Package]:
+    def to_list(self) -> list[Package]:
         return list(self._packages)
-
-    def count_by_manager(self) -> dict:
-        counts = {}
-        for mgr in PackageManager:
-            counts[mgr.value] = sum(1 for p in self._packages if p.manager == mgr)
-        return counts
 
     def sorted_by_tier(self) -> "PackageCollection":
         return PackageCollection(
@@ -385,7 +379,7 @@ class CpuInfo:
     frequency_mhz: float = 0.0
     max_frequency_mhz: float = 0.0
     cache_kb: int = 0
-    temperature_celsius: Optional[float] = None
+    temperature_celsius: float | None = None
     usage_percent: float = 0.0
 
 
@@ -415,8 +409,8 @@ class GpuInfo:
     model: str = ""
     vendor: str = ""
     driver: str = ""
-    memory_mb: Optional[int] = None
-    temperature_celsius: Optional[float] = None
+    memory_mb: int | None = None
+    temperature_celsius: float | None = None
 
 
 @dataclass
@@ -432,6 +426,6 @@ class NetworkInfo:
 class HardwareReport:
     cpu: CpuInfo = field(default_factory=CpuInfo)
     memory: MemoryInfo = field(default_factory=MemoryInfo)
-    disks: List[DiskInfo] = field(default_factory=list)
-    gpu: Optional[GpuInfo] = None
-    networks: List[NetworkInfo] = field(default_factory=list)
+    disks: list[DiskInfo] = field(default_factory=list)
+    gpu: GpuInfo | None = None
+    networks: list[NetworkInfo] = field(default_factory=list)

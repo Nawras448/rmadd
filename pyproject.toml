@@ -1,0 +1,79 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rmadd"
+version = "0.2.0"
+description = "All-in-one, modular Textual-based TUI for Linux system monitoring and cross-distribution package management."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "rmadd contributors" }]
+keywords = ["tui", "textual", "linux", "package-manager", "system-monitor"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Terminals",
+]
+dependencies = [
+    "textual>=8.2.8,<9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.4",
+    "mypy>=1.10",
+]
+
+[tool.setuptools]
+packages = ["rmadd", "rmadd.controllers", "rmadd.package_managers", "rmadd.screens", "rmadd.screens.widgets"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+# Project-idiomatic relaxations (documented deliberately):
+ignore = [
+    "E701",  # one-line command builders in adapters are the house style
+    "E731",  # executor lambdas are deliberate injection points
+    "B905",  # zip() runs over internally-guaranteed equal-length sequences
+]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["rmadd"]
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_redundant_casts = true
+no_implicit_optional = true
+# Gradual typing: untyped defs are allowed for now; core modules tighten first.
+disallow_untyped_defs = false
+
+# The widget/UI layer leans on Textual's dynamic query_one() returns and
+# duck-typed screens; static narrowing there is noise. Core logic modules
+# (models, state, package_managers.*, cache, tools, ui_keys) stay fully
+# checked under the global settings above.
+[[tool.mypy.overrides]]
+module = [
+    "rmadd.tui",
+    "rmadd.cli",
+    "rmadd.screens.*",
+    "rmadd.controllers.base",
+    "rmadd.controllers.search_controller",
+    "rmadd.controllers.installed_controller",
+    "rmadd.controllers.local_binaries_controller",
+    "rmadd.controllers.stats_controller",
+    "rmadd.controllers.tools_controller",
+    "rmadd.controllers.operations_controller",
+]
+disable_error_code = ["attr-defined", "index", "union-attr", "arg-type", "assignment", "operator", "call-overload"]

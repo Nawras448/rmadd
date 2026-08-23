@@ -1,11 +1,21 @@
 """Hardware monitoring: procfs readers and report service."""
 
+import os
 import re
+import shutil
 import subprocess
+import time
 from abc import ABC, abstractmethod
-from typing import Callable, Optional
 
-from rmadd.models import (CpuInfo, MemoryInfo, DiskInfo, GpuInfo, NetworkInfo, HardwareReport)
+from rmadd.models import (
+    CpuInfo,
+    DiskInfo,
+    GpuInfo,
+    HardwareReport,
+    MemoryInfo,
+    NetworkInfo,
+)
+
 
 class HardwareDataSource(ABC):
     @abstractmethod
@@ -21,24 +31,17 @@ class HardwareDataSource(ABC):
         pass
 
     @abstractmethod
-    def get_gpu_info(self) -> Optional[GpuInfo]:
+    def get_gpu_info(self) -> GpuInfo | None:
         pass
 
     @abstractmethod
     def get_network_info(self) -> list:
         pass
 
-import os
-import re
-import time
-import shutil
-import subprocess
-from typing import Optional
-
 
 class _CpuReader:
     def __init__(self):
-        self._prev_stat: Optional[tuple] = None
+        self._prev_stat: tuple | None = None
 
     def read(self) -> CpuInfo:
         info = CpuInfo()
@@ -76,7 +79,7 @@ class _CpuReader:
             pass
         return info
 
-    def _read_temp(self) -> Optional[float]:
+    def _read_temp(self) -> float | None:
         for path in ["/sys/class/thermal/thermal_zone0/temp", "/sys/class/hwmon/hwmon0/temp1_input",
                      "/sys/class/thermal/thermal_zone1/temp"]:
             try:
@@ -172,7 +175,7 @@ class _DiskReader:
 
 
 class _GpuReader:
-    def read(self) -> Optional[GpuInfo]:
+    def read(self) -> GpuInfo | None:
         try:
             out = subprocess.run(["lspci"], capture_output=True, text=True, timeout=10).stdout.strip()
             for line in out.split("\n"):
@@ -233,15 +236,13 @@ class ProcFsAdapter(HardwareDataSource):
     def get_cpu_info(self) -> CpuInfo: return self._cpu.read()
     def get_memory_info(self) -> MemoryInfo: return self._mem.read()
     def get_disk_info(self) -> list: return self._disk.read()
-    def get_gpu_info(self) -> Optional[GpuInfo]: return self._gpu.read()
+    def get_gpu_info(self) -> GpuInfo | None: return self._gpu.read()
     def get_network_info(self) -> list: return self._net.read()
 
 
 class HardwareMonitorService:
     def __init__(self, data_source: HardwareDataSource):
         self._ds = data_source
-        self._cpu_callbacks: list[Callable[[CpuInfo], None]] = []
-        self._mem_callbacks: list[Callable[[MemoryInfo], None]] = []
 
     def get_cpu_info(self) -> CpuInfo:
         return self._ds.get_cpu_info()
@@ -252,7 +253,7 @@ class HardwareMonitorService:
     def get_disk_info(self) -> list:
         return self._ds.get_disk_info()
 
-    def get_gpu_info(self) -> Optional[GpuInfo]:
+    def get_gpu_info(self) -> GpuInfo | None:
         return self._ds.get_gpu_info()
 
     def get_network_info(self) -> list:
@@ -267,9 +268,4 @@ class HardwareMonitorService:
             networks=self.get_network_info(),
         )
 
-    def subscribe_cpu(self, callback: Callable[[CpuInfo], None]) -> None:
-        self._cpu_callbacks.append(callback)
-
-    def subscribe_memory(self, callback: Callable[[MemoryInfo], None]) -> None:
-        self._mem_callbacks.append(callback)
 

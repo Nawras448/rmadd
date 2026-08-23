@@ -1,16 +1,17 @@
 """AppImageAdapter adapter."""
 
 import os
-from typing import Optional
-from rmadd.models import Package, PackageManager, PackageStatus, Repo
+
+from rmadd.models import Package, PackageManager
 from rmadd.package_managers.base import BaseAdapter
+
 
 class Adapter(BaseAdapter):
     """File-based source: manages *.AppImage files on disk (no binary)."""
 
     DEFAULT_DIRS = ("~/Applications", "~/.local/bin", "/opt")
 
-    def __init__(self, dirs=None, install_dir: Optional[str] = None):
+    def __init__(self, dirs=None, install_dir: str | None = None):
         super().__init__(PackageManager.APPIMAGE)
         self._available = True
         self._dirs = dirs or self.DEFAULT_DIRS
@@ -19,7 +20,7 @@ class Adapter(BaseAdapter):
     def _expanded_dirs(self) -> list:
         return [os.path.expanduser(d) for d in self._dirs]
 
-    def _find_path(self, name: str) -> Optional[str]:
+    def _find_path(self, name: str) -> str | None:
         for d in self._expanded_dirs():
             if not os.path.isdir(d):
                 continue
@@ -41,7 +42,7 @@ class Adapter(BaseAdapter):
                                         manager=self._manager))
         return pkgs
 
-    def get_info(self, name: str) -> Optional[Package]:
+    def get_info(self, name: str) -> Package | None:
         path = self._find_path(name)
         if not path:
             return None

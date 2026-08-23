@@ -1,6 +1,5 @@
 """Base package-manager abstraction, shared runner, discovery."""
 
-import json
 import os
 import re
 import shutil
@@ -9,16 +8,17 @@ import subprocess
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from enum import Enum
 from importlib import import_module
-from typing import Callable, Optional
 
 from rmadd.models import (
+    TIER_ORDER,
     Package,
     PackageManager,
     PackageManagerTier,
     PackageStatus,
-    Repo,
-    TIER_ORDER,
     meta,
     supports,
     tier,
@@ -28,6 +28,140 @@ from rmadd.models import (
 def _strip_version(token: str) -> str:
     """Strip a trailing version suffix from a package token."""
     return re.sub(r"-\d.*$", "", token)
+
+
+# =====================================================================
+# Operation results: rich failure contexts (Milestone 2)
+# =====================================================================
+
+DEFAULT_AUTH_TIMEOUT_SECONDS: float = 120.0
+DEFAULT_EXECUTION_TIMEOUT_SECONDS: float = 600.0
+
+_PKEXEC_DENIAL_MARKERS = (
+    "not authorized",
+    "no authentication agent",
+    "no polkit",
+    "authentication required",
+)
+
+
+class FailureReason(str, Enum):
+    """Why a streamed operation did not succeed (NONE implies success)."""
+
+    NONE = "none"
+    CANCELLED = "cancelled"
+    AUTH_DENIED = "auth_denied"
+    AUTH_UNAVAILABLE = "auth_unavailable"
+    AUTH_TIMEOUT = "auth_timeout"
+    TIMEOUT = "timeout"
+    MANAGER_MISSING = "manager_missing"
+    UNSUPPORTED = "unsupported"
+    FAILED = "failed"
+
+
+FAILURE_DESCRIPTIONS: dict[FailureReason, str] = {
+    FailureReason.NONE: "completed",
+    FailureReason.CANCELLED: "cancelled by user",
+    FailureReason.AUTH_DENIED: "authentication denied",
+    FailureReason.AUTH_UNAVAILABLE: "no privilege escalation tool available (need pkexec or sudo)",
+    FailureReason.AUTH_TIMEOUT: "timed out waiting for authentication",
+    FailureReason.TIMEOUT: "command timed out",
+    FailureReason.MANAGER_MISSING: "package manager is not available on this system",
+    FailureReason.UNSUPPORTED: "operation not supported by this package manager",
+    FailureReason.FAILED: "command failed",
+}
+
+
+@dataclass(frozen=True)
+class OpResult:
+    """Rich outcome of a streamed command execution.
+
+    ``ok``/``cancelled`` mirror the historical tuple semantics; ``reason``
+    carries the failure context (see :class:`FailureReason`) and ``tail``
+    the last output lines for diagnostics.
+    """
+
+    ok: bool
+    cancelled: bool = False
+    reason: FailureReason = FailureReason.NONE
+    tail: str = ""
+
+    def describe(self) -> str:
+        return FAILURE_DESCRIPTIONS[self.reason]
+
+
+@dataclass
+class OpReport:
+    """Aggregate of per-target OpResults for batch operations.
+
+    Individual failures are isolated: one bad target never drops the rest
+    of the report. `ok` is True for an empty batch (nothing to do).
+    """
+
+    entries: list[tuple[str, OpResult]] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return all(r.ok for _k, r in self.entries)
+
+    @property
+    def cancelled(self) -> bool:
+        return any(r.cancelled for _k, r in self.entries)
+
+    @property
+    def failures(self) -> list[tuple[str, OpResult]]:
+        return [(k, r) for k, r in self.entries if not r.ok]
+
+    def describe(self) -> str:
+        if not self.entries:
+            return "nothing executed"
+        parts: list[str] = []
+        failed = self.failures
+        parts.append(f"{len(self.entries) - len(failed)}/{len(self.entries)} succeeded")
+        if self.cancelled:
+            parts.append("cancelled")
+        if failed:
+            parts.append(
+                "failed: " + ", ".join(f"{k} ({r.describe()})" for k, r in failed)
+            )
+        if self.skipped:
+            parts.append("skipped: " + ", ".join(self.skipped))
+        return "; ".join(parts)
+
+
+def _tail_text(tail: list, limit: int = 2000) -> str:
+    """Join the rolling output tail, bounded for result payloads."""
+    return "".join(tail).strip()[-limit:]
+
+
+_execution_timeout_override: float | None = None
+
+
+def set_default_execution_timeout(seconds: float) -> None:
+    """Runtime override applied to adapters created from now on.
+
+    Used by `Config.op_timeout_seconds`'s setter; validation happens here so
+    every entry point shares one guard.
+    """
+    global _execution_timeout_override
+    value = float(seconds)
+    if value <= 0:
+        raise ValueError("op_timeout_seconds must be positive")
+    _execution_timeout_override = value
+
+
+def _configured_execution_timeout() -> float:
+    """Execution budget for new adapters: runtime override, else config."""
+    if _execution_timeout_override is not None:
+        return _execution_timeout_override
+    try:
+        from rmadd.config import Config
+
+        value = float(Config().op_timeout_seconds)
+    except Exception:
+        return DEFAULT_EXECUTION_TIMEOUT_SECONDS
+    return value if value > 0 else DEFAULT_EXECUTION_TIMEOUT_SECONDS
 
 
 class BasePackageManager(ABC):
@@ -72,7 +206,7 @@ class BasePackageManager(ABC):
         pass
 
     @abstractmethod
-    def get_info(self, name: str) -> Optional[Package]:
+    def get_info(self, name: str) -> Package | None:
         pass
 
     @abstractmethod
@@ -110,10 +244,26 @@ class BasePackageManager(ABC):
 class BaseAdapter(BasePackageManager):
     """Common backend: binary probing, command execution and privilege handling."""
 
-    def __init__(self, manager: PackageManager):
+    def __init__(
+        self,
+        manager: PackageManager,
+        *,
+        auth_timeout: float | None = None,
+        execution_timeout: float | None = None,
+    ):
         super().__init__(manager)
         self._available = any(
             shutil.which(binary) is not None for binary in self.binaries
+        )
+        # Two-phase deadlines: auth budget covers silent polkit/sudo prompts;
+        # execution budget governs the run after the first output line.
+        self.auth_timeout = (
+            auth_timeout if auth_timeout is not None else DEFAULT_AUTH_TIMEOUT_SECONDS
+        )
+        self.execution_timeout = (
+            execution_timeout
+            if execution_timeout is not None
+            else _configured_execution_timeout()
         )
 
     @property
@@ -136,38 +286,59 @@ class BaseAdapter(BasePackageManager):
                 return [tool]
         return []
 
-    def _run_stream(
+    def run_stream(
         self,
         cmd: list,
-        on_output: Optional[Callable[[str], None]],
-        cancel_event: Optional[threading.Event],
-        timeout: int = 600,
-        privileged: Optional[bool] = None,
-    ) -> tuple:
+        on_output: Callable[[str], None] | None = None,
+        cancel_event: threading.Event | None = None,
+        timeout: float | None = None,
+        privileged: bool | None = None,
+    ) -> OpResult:
         """Run a command, streaming output line by line.
 
-        Returns (ok: bool, cancelled: bool). When cancel_event is set the
-        process group is terminated (SIGTERM, then SIGKILL after a grace
-        period). Output lines are delivered to on_output (may be None).
+        Two-phase deadlines: while the child produces NO output the auth
+        budget applies (polkit/sudo prompts stall silently); once the first
+        line arrives the execution budget governs the remainder.
+
+        Returns an OpResult instead of raising: preconditions surface as
+        MANAGER_MISSING / AUTH_UNAVAILABLE, silent stalls as AUTH_TIMEOUT,
+        overruns as TIMEOUT, user aborts as CANCELLED. A pkexec denial
+        triggers a fallback attempt with the next escalation tool.
+
         The reader runs in a daemon thread so cancellation works even while
         the child process is silent (e.g. waiting at an auth prompt).
         """
         if not self._available:
-            raise RuntimeError(f"{self._manager.value} is not available on this system")
+            return OpResult(False, reason=FailureReason.MANAGER_MISSING)
         if privileged is None:
             privileged = self.needs_root
         if os.geteuid() == 0 or not privileged:
-            candidates = [[]]
+            candidates: list[list] = [[]]
         else:
-            candidates = [[t] for t in ("pkexec", "sudo") if shutil.which(t)]
-        if not candidates:
-            raise RuntimeError("No privilege escalation tool available (need pkexec or sudo)")
+            # Resolve each escalation tool to its absolute path at probe
+            # time so Popen executes exactly the inspected binary rather
+            # than re-resolving the name (and possibly a different one)
+            # through PATH.
+            candidates = []
+            for tool in ("pkexec", "sudo"):
+                resolved = shutil.which(tool)
+                if resolved:
+                    candidates.append([resolved])
+            if not candidates:
+                return OpResult(False, reason=FailureReason.AUTH_UNAVAILABLE)
+
+        exec_budget = float(timeout) if timeout is not None else float(self.execution_timeout)
+        auth_budget = float(self.auth_timeout)
 
         tail: list[str] = []
-        last_rc = 1
+        lines_seen = [0]
         last_cancelled = False
+        saw_denial = False
+
         for prefix in candidates:
             proc = None
+            reader = None
+            pgid: int | None = None
             try:
                 proc = subprocess.Popen(
                     prefix + cmd,
@@ -177,96 +348,150 @@ class BaseAdapter(BasePackageManager):
                     bufsize=1,
                     start_new_session=True,
                 )
+                try:
+                    pgid = os.getpgid(proc.pid)
+                except OSError:
+                    pgid = proc.pid  # process already reaped; fall back to pid
                 reader = threading.Thread(
-                    target=self._drain, args=(proc, on_output, tail), daemon=True
+                    target=self._drain,
+                    args=(proc, on_output, tail, lines_seen),
+                    daemon=True,
                 )
                 reader.start()
-                deadline = time.monotonic() + timeout
+
+                started = time.monotonic()
+                timed_out: FailureReason | None = None
                 while proc.poll() is None:
                     if cancel_event is not None and cancel_event.is_set():
                         last_cancelled = True
                         break
-                    if time.monotonic() > deadline:
-                        raise RuntimeError("Command timed out")
+                    elapsed = time.monotonic() - started
+                    budget = exec_budget if lines_seen[0] > 0 else auth_budget
+                    if elapsed > budget:
+                        timed_out = (
+                            FailureReason.TIMEOUT
+                            if lines_seen[0] > 0
+                            else FailureReason.AUTH_TIMEOUT
+                        )
+                        break
                     time.sleep(0.05)
-                reader.join(timeout=2)
-                last_rc = proc.returncode or 1
-                if last_rc == 0:
-                    return (True, False)
-                err = "".join(tail).strip().lower()
-                if last_cancelled:
-                    return (False, True)
-                if prefix and prefix[0] == "pkexec" and any(
-                    w in err
-                    for w in ("not authorized", "no authentication agent", "no polkit", "authentication required")
-                ):
-                    continue
-                return (False, last_cancelled)
-            finally:
-                self._terminate(proc)
-        return (False, last_cancelled)
 
-    def _run_priv_stream(self, cmd, on_output=None, cancel_event=None, timeout=600) -> tuple:
-        return self._run_stream(cmd, on_output, cancel_event, timeout, privileged=True)
+                if timed_out is not None:
+                    return OpResult(False, last_cancelled, timed_out, _tail_text(tail))
+
+                # Child exited on its own: let the drain thread finish
+                # flushing the pipe so tail/lines_seen are complete before
+                # the outcome is classified (avoids sampling an empty tail).
+                if reader is not None:
+                    reader.join(timeout=1.0)
+
+                if proc.poll() is not None and proc.returncode == 0:
+                    return OpResult(True, False, FailureReason.NONE, _tail_text(tail))
+                if last_cancelled:
+                    return OpResult(False, True, FailureReason.CANCELLED, _tail_text(tail))
+
+                err = _tail_text(tail).lower()
+                if (
+                    prefix
+                    and os.path.basename(prefix[0]) == "pkexec"
+                    and any(w in err for w in _PKEXEC_DENIAL_MARKERS)
+                ):
+                    saw_denial = True
+                    continue
+                return OpResult(False, last_cancelled, FailureReason.FAILED, _tail_text(tail))
+            finally:
+                if reader is not None:
+                    reader.join(timeout=2)
+                self._terminate(proc, pgid)
+
+        reason = (
+            FailureReason.CANCELLED
+            if last_cancelled
+            else (FailureReason.AUTH_DENIED if saw_denial else FailureReason.FAILED)
+        )
+        return OpResult(False, last_cancelled, reason, _tail_text(tail))
+
+    def _run_priv_stream(self, cmd, on_output=None, cancel_event=None, timeout=600) -> OpResult:
+        return self.run_stream(cmd, on_output, cancel_event, timeout, privileged=True)
 
     def _run_priv(self, cmd: list, timeout: int = 300) -> bool:
-        ok, _ = self._run_stream(cmd, None, None, timeout)
-        return ok
+        return self.run_stream(cmd, None, None, timeout).ok
 
     @staticmethod
-    def _drain(proc: subprocess.Popen, on_output, tail: list):
+    def _drain(proc: subprocess.Popen, on_output, tail: list, lines_seen: list | None = None):
         strip_c0 = {7: None, 8: None, 27: None}  # \a \b \e
         try:
-            for line in proc.stdout:
+            stream = proc.stdout
+            if stream is None:
+                return
+            for line in stream:
                 line = line.translate(strip_c0)
                 if tail is not None:
                     tail.append(line)
                     if len(tail) > 20:
                         tail.pop(0)
+                if lines_seen is not None:
+                    lines_seen[0] += 1
                 if on_output is not None:
                     on_output(line)
         except Exception:
             pass
 
     @staticmethod
-    def _terminate(proc: Optional[subprocess.Popen]):
+    def _terminate(proc: subprocess.Popen | None, pgid: int | None = None):
+        """SIGTERM the process group, then SIGKILL after a grace period.
+
+        Termination targets the captured pgid (pid-reuse safe); falls back
+        to proc.pid when no group was captured.
+        """
         if proc is None or proc.poll() is not None:
             return
-        try:
-            os.killpg(proc.pid, signal.SIGTERM)
-            proc.wait(timeout=2)
-        except Exception:
-            pass
-        if proc.poll() is None:
+        target = pgid if pgid is not None else proc.pid
+        for sig in (signal.SIGTERM, signal.SIGKILL):
             try:
-                os.killpg(proc.pid, signal.SIGKILL)
+                os.killpg(target, sig)
                 proc.wait(timeout=2)
             except Exception:
                 pass
+            if proc.poll() is not None:
+                return
+        # Last resort if the group signal never landed.
+        try:
+            proc.kill()
+            proc.wait(timeout=2)
+        except Exception:
+            pass
+
+    def _run_op(
+        self,
+        op: str,
+        name: str | None,
+        on_output=None,
+        cancel_event=None,
+    ) -> OpResult:
+        """Dispatch a mutating operation to its command builder + runner."""
+        if not self.supports(op):
+            return OpResult(False, reason=FailureReason.UNSUPPORTED)
+        builders = {
+            "install": lambda: self._install_cmd(name or ""),
+            "remove": lambda: self._remove_cmd(name or ""),
+            "update": lambda: self._update_cmd(name or ""),
+            "update_all": self._update_all_cmd,
+        }
+        cmd = builders[op]()
+        return self.run_stream(cmd, on_output, cancel_event)
 
     def install(self, name: str, on_output=None, cancel_event=None) -> bool:
-        if not self.supports("install"):
-            return False
-        ok, _ = self._run_stream(self._install_cmd(name), on_output, cancel_event)
-        return ok
+        return self._run_op("install", name, on_output, cancel_event).ok
 
     def remove(self, name: str, on_output=None, cancel_event=None) -> bool:
-        if not self.supports("remove"):
-            return False
-        ok, _ = self._run_stream(self._remove_cmd(name), on_output, cancel_event)
-        return ok
+        return self._run_op("remove", name, on_output, cancel_event).ok
 
     def update(self, name: str, on_output=None, cancel_event=None) -> bool:
-        if not self.supports("update"):
-            return False
-        ok, _ = self._run_stream(self._update_cmd(name), on_output, cancel_event)
-        return ok
+        return self._run_op("update", name, on_output, cancel_event).ok
 
     def update_all(self, on_output=None, cancel_event=None) -> bool:
-        if not self.supports("update_all"):
-            return False
-        ok, _ = self._run_stream(self._update_all_cmd(), on_output, cancel_event)
-        return ok
+        return self._run_op("update_all", None, on_output, cancel_event).ok
 
     def search(self, query: str) -> list:
         if not self.supports("search"):
@@ -385,7 +610,7 @@ def adapter_class(manager: PackageManager) -> type:
     return import_module(module, __package__).Adapter
 
 
-def discover_managers(families: Optional[list] = None, *, include_local: bool = False) -> list:
+def discover_managers(families: list | None = None, *, include_local: bool = False) -> list:
     """Discover available package managers in strict priority order.
 
     Returns a list of (PackageManager, adapter instance) ordered by:
@@ -415,7 +640,7 @@ def discover_local_scanner():
     return Adapter()
 
 
-def resolve_system_manager(families: Optional[list] = None) -> Optional[PackageManager]:
+def resolve_system_manager(families: list | None = None) -> PackageManager | None:
     """Return the first available native manager (prefers host family match)."""
     if families is None:
         families = distro_family()

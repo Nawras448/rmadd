@@ -145,7 +145,7 @@ def make_local_binaries(directory):
         path = os.path.join(directory, name)
         with open(path, "w") as fh:
             fh.write("#!/bin/sh\n")
-            fh.write('echo "%s"\n' % banner)
+            fh.write(f'echo "{banner}"\n')
         os.chmod(path, 0o755)
     return directory
 
@@ -182,7 +182,7 @@ async def capture_search(pilot, fake):
     await pilot.pause(0.4)
     input_widget = store.query_one("#search-input", Input)
     input_widget.value = "vim"
-    await store._do_search("vim")
+    await store.search.run("vim")
     await pilot.pause(0.4)
     save_screenshot(pilot.app, "search-view")
 
@@ -192,7 +192,7 @@ async def capture_installed(pilot, fake):
     set_tab(store, "pane-installed")
     for _ in range(20):
         await pilot.pause(0.1)
-        if store._installed_pkgs:
+        if store.ops.state.installed_packages():
             break
     await pilot.pause(0.3)
     save_screenshot(pilot.app, "installed-apps")
@@ -203,7 +203,7 @@ async def capture_local(pilot, fake):
     set_tab(store, "pane-local")
     for _ in range(30):
         await pilot.pause(0.1)
-        if store._local_pkgs:
+        if store.ops.state.local_packages():
             break
     await pilot.pause(0.3)
     save_screenshot(pilot.app, "local-binaries")
@@ -221,7 +221,7 @@ async def main():
             app = RmaddTuiApp(FakeSystem(), FakePackageService(), FakeHardware())
             async with app.run_test(size=size) as pilot:
                 if name == "local":
-                    app.screen._local_adapter = LocalAdapter(
+                    app.screen.local_bin._adapter = LocalAdapter(
                         search_dirs=[tmpdir], version_timeout=1, probe_limit=64
                     )
                 await pilot.pause(0.3)

@@ -687,3 +687,58 @@ ProgressBar > .bar--indeterminate {
     margin: 0 0 0 1;
 }
 
+
+/* ---- M3 Step 2: search status chip & help overlay ---- */
+.search-chip {
+    height: 1;
+    color: $secondary;
+    padding: 0 1;
+}
+
+HelpOverlay {
+    align: center middle;
+}
+
+#help-panel {
+    width: 64;
+    max-width: 90%;
+    height: auto;
+    max-height: 80%;
+    background: $surface;
+    border: round $primary;
+    padding: 1 2;
+}
+
+#help-title {
+    text-style: bold;
+    color: $primary;
+    margin-bottom: 1;
+}
+
+#help-body {
+    color: $foreground;
+}
+
+#confirm-panel {
+    width: 48;
+    max-width: 90%;
+    height: auto;
+    background: $surface;
+    border: round $error;
+    padding: 1 2;
+}
+
+#confirm-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+#confirm-hint {
+    color: $text-muted;
+    margin-bottom: 1;
+}
+
+#confirm-buttons {
+    height: auto;
+    align-horizontal: right;
+}

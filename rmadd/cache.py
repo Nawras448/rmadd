@@ -1,10 +1,10 @@
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
-from rmadd.system_info import SystemDataSource
 from rmadd.hardware import HardwareDataSource
-from rmadd.models import Distribution
-from rmadd.models import CpuInfo, MemoryInfo, DiskInfo, GpuInfo, NetworkInfo
+from rmadd.models import CpuInfo, Distribution, GpuInfo, MemoryInfo
+from rmadd.system_info import SystemDataSource
 
 
 class _CacheMixin:

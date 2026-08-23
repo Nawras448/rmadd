@@ -6,6 +6,7 @@ from textual.app import App
 from textual.binding import Binding
 from textual.theme import Theme
 
+from rmadd import __version__
 from rmadd.screens.store_screen import StoreScreen
 from rmadd.state import PackageStateBus
 
@@ -49,14 +50,14 @@ CYBERPUNK_THEME = Theme(
 
 
 class RmaddTuiApp(App):
-    TITLE = "rmadd v0.1.0"
+    TITLE = f"rmadd v{__version__}"
     SUB_TITLE = "Package & System Monitor"
 
     CSS_PATH = _CSS
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("r", "refresh", "Refresh"),
+        Binding("R", "refresh", "Force Refresh"),
     ]
 
     def __init__(self, system_service, package_service, hardware_service):

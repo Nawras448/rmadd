@@ -1,9 +1,9 @@
 import asyncio
 
-from textual.screen import Screen
-from textual.widgets import Header, Footer, Static, Button
-from textual.containers import Horizontal, Vertical
 from textual.binding import Binding
+from textual.containers import Horizontal, Vertical
+from textual.screen import Screen
+from textual.widgets import Button, Footer, Header, Static
 
 from rmadd.models import Package, PackageStatus, supports
 from rmadd.screens.install_progress_screen import InstallProgressScreen
@@ -15,11 +15,13 @@ class PackageDetailScreen(Screen):
         Binding("i", "quick_install", "Install"),
     ]
 
-    def __init__(self, pkg: Package, package_service, is_installed: bool | None = None):
+    def __init__(self, pkg: Package, package_service, is_installed: bool | None = None,
+                 confirm_remove: bool = False):
         super().__init__()
         self._pkg = pkg
         self._ps = package_service
         self._is_installed = is_installed
+        self._confirm_remove = bool(confirm_remove)
 
     def compose(self):
         yield Header(show_clock=True)
@@ -91,6 +93,20 @@ class PackageDetailScreen(Screen):
         if action in ("remove", "update") and self._is_installed is False:
             self.notify("Not installed", severity="warning")
             return
+        if action == "remove" and self._confirm_remove:
+            from rmadd.screens.confirm_remove import ConfirmRemoveScreen
+
+            def _after(confirmed):
+                if confirmed:
+                    self._launch(action)
+
+            self.app.push_screen(
+                ConfirmRemoveScreen(self._pkg.name, self._pkg.manager), _after
+            )
+            return
+        self._launch(action)
+
+    def _launch(self, action: str):
         self.app.state_bus.emit(action, self._pkg.name, self._pkg.manager, phase="pending")
         self.app.push_screen(
             InstallProgressScreen(
@@ -102,19 +118,18 @@ class PackageDetailScreen(Screen):
             )
         )
 
-    def _on_operation_finished(self, action: str, section: str, name, mgr, ok: bool, cancelled: bool):
-        result = self.query_one("#action-result", Static)
+    def _on_operation_finished(self, action: str, section: str, name, mgr, ok: bool, cancelled: bool, result=None):
+        from rmadd.screens import op_feedback
+
+        pane = self.query_one("#action-result", Static)
         label = action.title()
         if cancelled:
-            result.update(f"[bold red]✗ {label} cancelled ({name})[/bold red]")
-            if action == "remove":
-                self.notify(f"Remove cancelled ({name})", severity="warning")
+            pane.update(f"[bold red]✗ {label} cancelled ({name})[/bold red]")
         elif ok:
-            result.update(f"[bold green]✓ {label} succeeded ({name})[/bold green]")
+            pane.update(f"[bold green]✓ {label} succeeded ({name})[/bold green]")
         else:
-            result.update(f"[bold red]✗ {label} failed ({name})[/bold red]")
-            if action == "remove":
-                self.notify(f"Failed to remove {name} — it may still be present", severity="error")
+            pane.update(op_feedback.failure_line(action, name, result))
+        op_feedback.apply(self, action, name, mgr, result, cancelled)
         if ok and self._is_installed is not None:
             if action == "install":
                 self._is_installed = True

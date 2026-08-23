@@ -1,6 +1,6 @@
 """App-wide pub/sub bus for package status changes across views."""
 
-from typing import Callable
+from collections.abc import Callable
 
 
 class PackageStateBus:

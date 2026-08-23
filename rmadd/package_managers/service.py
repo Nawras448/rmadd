@@ -1,27 +1,32 @@
 """Aggregate package service with threaded querying and caching."""
 
+import concurrent.futures
 import json
 import os
 import threading
 import time
-import concurrent.futures
+from collections.abc import Callable
 from dataclasses import replace
 from threading import Event
-from typing import Callable, Optional
+from typing import cast
 
-from rmadd.package_managers.base import BasePackageManager
+from rmadd.logging import get_logger  # noqa: F401  (re-exported for tooling)
 from rmadd.models import (
     Package,
+    PackageCollection,
     PackageManager,
     PackageManagerTier,
     PackageStatus,
-    Repo,
-    PackageCollection,
     supports,
     tier,
 )
+from rmadd.package_managers.base import (
+    BasePackageManager,
+    FailureReason,
+    OpReport,
+    OpResult,
+)
 from rmadd.state import PackageStateBus
-
 
 MONITORED_PATHS: dict[PackageManager, tuple[str, ...]] = {
     PackageManager.APT: ("/var/lib/dpkg/status",),
@@ -63,9 +68,21 @@ class PackageManagerService:
         self._is_syncing_installed = False
         self._cache_lock = threading.Lock()
         self._state_bus: PackageStateBus | None = None
+        # Two long-lived pools (M2 Step 3): queries share one; installed
+        # fan-out gets its own so a background refresh running ON `_pool`
+        # can fan out without self-nesting deadlock. No per-call churn.
+        workers = max(1, min(self.MAX_POOL_WORKERS, len(sources)))
         self._pool = concurrent.futures.ThreadPoolExecutor(
-            max_workers=max(1, min(self.MAX_POOL_WORKERS, len(sources)))
+            max_workers=workers, thread_name_prefix="rmadd-query"
         )
+        self._fetch_pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=workers, thread_name_prefix="rmadd-fetch"
+        )
+
+    def shutdown(self, wait: bool = True) -> None:
+        """Release pooled worker threads. The service is unusable after."""
+        self._pool.shutdown(wait=wait)
+        self._fetch_pool.shutdown(wait=wait)
 
     def set_state_bus(self, bus: PackageStateBus) -> None:
         self._state_bus = bus
@@ -100,22 +117,23 @@ class PackageManagerService:
     def _fetch_all_installed(self) -> dict[PackageManager, PackageCollection]:
         """Run the concurrent adapter queries and bucket results per manager.
 
-        Uses a dedicated executor so this can safely run from a worker of
-        ``self._pool`` (background refresh) without recursive pool deadlock.
+        Uses the dedicated long-lived fetch executor so this can safely run
+        from a worker of ``self._pool`` (background refresh) without
+        recursive pool deadlock, and without per-call executor churn.
         """
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=max(1, min(self.MAX_POOL_WORKERS, len(self._sources)))
-        ) as ex:
-            futures = {ex.submit(self._source(mgr).list_installed): mgr for mgr in self._sources}
-            by_manager: dict[PackageManager, list] = {mgr: [] for mgr in self._sources}
-            for fut in concurrent.futures.as_completed(futures):
-                mgr = futures[fut]
-                try:
-                    for p in fut.result():
-                        p.manager = mgr
-                        by_manager[mgr].append(p)
-                except Exception:
-                    continue
+        futures = {
+            self._fetch_pool.submit(self._source(mgr).list_installed): mgr
+            for mgr in self._sources
+        }
+        by_manager: dict[PackageManager, list] = {mgr: [] for mgr in self._sources}
+        for fut in concurrent.futures.as_completed(futures):
+            mgr = futures[fut]
+            try:
+                for p in fut.result():
+                    p.manager = mgr
+                    by_manager[mgr].append(p)
+            except Exception:
+                continue
         return {mgr: PackageCollection(pkgs) for mgr, pkgs in by_manager.items()}
 
     @staticmethod
@@ -190,7 +208,7 @@ class PackageManagerService:
             path = self._installed_disk_cache_path()
             if not os.path.exists(path):
                 return None
-            with open(path) as fh:
+            with open(path, encoding="utf-8") as fh:
                 data = json.load(fh)
             if not isinstance(data, dict) or data.get("version") != self.DISK_CACHE_VERSION:
                 return None
@@ -447,18 +465,99 @@ class PackageManagerService:
     def list_repos(self, manager: PackageManager) -> list:
         return self._source(manager).list_repos()
 
+    # ------------------------------------------------ op results (M2) --
+
+    def _op_result(
+        self,
+        manager: PackageManager,
+        op: str,
+        name: str | None,
+        on_output: Callable[[str], None] | None = None,
+        cancel_event: Event | None = None,
+    ) -> OpResult:
+        """Rich operation result; bool-only sources are synthesized."""
+        source = self._source(manager)
+        runner = getattr(source, "_run_op", None)
+        if runner is not None:
+            return runner(op, name, on_output, cancel_event)
+        method = getattr(source, op)
+        ok = bool(method(name, on_output, cancel_event))
+        cancelled = bool(cancel_event is not None and cancel_event.is_set())
+        if ok:
+            return OpResult(True, False, FailureReason.NONE)
+        reason = FailureReason.CANCELLED if cancelled else FailureReason.FAILED
+        return OpResult(False, cancelled, reason)
+
+    def install_result(self, name, manager, on_output=None, cancel_event=None) -> OpResult:
+        return self._op_result(manager, "install", name, on_output, cancel_event)
+
+    def remove_result(self, name, manager, on_output=None, cancel_event=None) -> OpResult:
+        return self._op_result(manager, "remove", name, on_output, cancel_event)
+
+    def update_result(self, name, manager, on_output=None, cancel_event=None) -> OpResult:
+        return self._op_result(manager, "update", name, on_output, cancel_event)
+
+    def update_all_result(self, manager, on_output=None, cancel_event=None) -> OpResult:
+        return self._op_result(manager, "update_all", None, on_output, cancel_event)
+
+    # ---------------------------------------------------- batch runner --
+
+    def run_batch(
+        self,
+        op: str,
+        targets,
+        on_output: Callable[[str], None] | None = None,
+        cancel_event: Event | None = None,
+    ) -> OpReport:
+        """Execute ``op`` over ``(name|None, manager)`` targets sequentially.
+
+        Failure isolation: a target raising or failing only marks its own
+        entry; the batch continues. Cancellation is checked between targets
+        (a running subprocess honours the event internally); remaining
+        targets are recorded as skipped, never dropped silently.
+        """
+        report = OpReport()
+        for name, manager in targets:
+            key = manager.value if name is None else f"{name}@{manager.value}"
+            if cancel_event is not None and cancel_event.is_set():
+                report.skipped.append(key)
+                continue
+            if on_output is not None:
+                on_output(f"==> {key}\n")
+            try:
+                result = self._op_result(manager, op, name, on_output, cancel_event)
+            except Exception as e:  # isolation: never drop the batch report
+                result = OpResult(False, reason=FailureReason.FAILED, tail=str(e))
+            report.entries.append((key, result))
+        return report
+
+    def batch_update_all(
+        self,
+        managers=None,
+        on_output=None,
+        cancel_event=None,
+    ) -> OpReport:
+        """update_all across managers that declare the capability."""
+        if managers is None:
+            managers = [m for m in self._sources if supports(m, "update_all")]
+        return self.run_batch("update_all", [(None, m) for m in managers], on_output, cancel_event)
+
+    # ------------------------------------------------ legacy bool API --
+
     def install(
         self,
         name: str,
         manager: PackageManager,
-        progress_callback=None,
-        on_output: Optional[Callable[[str], None]] = None,
-        cancel_event: Optional[Event] = None,
+        on_output: Callable[[str], None] | None = None,
+        cancel_event: Event | None = None,
     ) -> bool:
-        return self._source(manager).install(name, on_output, cancel_event)
+        return self.install_result(name, manager, on_output, cancel_event).ok
 
     def install_appimage(self, source_path: str, on_output=None, cancel_event=None) -> bool:
-        return self._source(PackageManager.APPIMAGE).install(
+        from rmadd.package_managers.appimage import Adapter as _AppImageAdapter
+
+        appimage = cast(_AppImageAdapter, self._source(PackageManager.APPIMAGE))
+        return appimage.install(
             os.path.basename(source_path), on_output, cancel_event, source_path=source_path
         )
 
@@ -466,25 +565,24 @@ class PackageManagerService:
         self,
         name: str,
         manager: PackageManager,
-        progress_callback=None,
-        on_output: Optional[Callable[[str], None]] = None,
-        cancel_event: Optional[Event] = None,
+        on_output: Callable[[str], None] | None = None,
+        cancel_event: Event | None = None,
     ) -> bool:
-        return self._source(manager).remove(name, on_output, cancel_event)
+        return self.remove_result(name, manager, on_output, cancel_event).ok
 
     def update(
         self,
         name: str,
         manager: PackageManager,
-        on_output: Optional[Callable[[str], None]] = None,
-        cancel_event: Optional[Event] = None,
+        on_output: Callable[[str], None] | None = None,
+        cancel_event: Event | None = None,
     ) -> bool:
-        return self._source(manager).update(name, on_output, cancel_event)
+        return self.update_result(name, manager, on_output, cancel_event).ok
 
     def update_all(
         self,
         manager: PackageManager,
-        on_output: Optional[Callable[[str], None]] = None,
-        cancel_event: Optional[Event] = None,
+        on_output: Callable[[str], None] | None = None,
+        cancel_event: Event | None = None,
     ) -> bool:
-        return self._source(manager).update_all(on_output, cancel_event)
+        return self.update_all_result(manager, on_output, cancel_event).ok

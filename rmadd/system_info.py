@@ -3,7 +3,8 @@
 import subprocess
 from abc import ABC, abstractmethod
 
-from rmadd.models import SystemInfo, Distribution
+from rmadd.models import Distribution, SystemInfo
+
 
 class SystemDataSource(ABC):
     @abstractmethod
@@ -34,7 +35,6 @@ class SystemDataSource(ABC):
     def get_distribution(self) -> Distribution:
         pass
 
-import subprocess
 
 _RUN_TIMEOUT = 5
 
@@ -115,9 +115,6 @@ class SystemInfoService:
         if self._cache:
             return self._cache
         return self._build()
-
-    def get_distribution(self) -> Distribution:
-        return self._ds.get_distribution()
 
     def refresh(self) -> None:
         self._cache = None

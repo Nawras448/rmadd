@@ -1,6 +1,4 @@
-"""Local standalone-binary scanner and its file-based package adapter."""
-
-"""Standalone local-binary detection.
+"""Local standalone-binary scanner and its file-based package adapter.
 
 Scans user-level bin directories and the system $PATH for executables that
 are not tracked by any registered package manager (e.g. manually downloaded
@@ -14,10 +12,9 @@ import shutil
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from typing import Optional
 
-from rmadd.package_managers.base import BasePackageManager
 from rmadd.models import Package, PackageManager, PackageStatus
+from rmadd.package_managers.base import BasePackageManager
 
 PRIORITY_DIRS = ("~/.local/bin", "~/bin", "/usr/local/bin")
 FALLBACK_VERSION = "Standalone Binary"
@@ -43,6 +40,22 @@ class LocalBinaryScanner:
         self._scan_path = scan_path
         self._version_cache: dict[str, tuple[int, str]] = {}
         self._lock = threading.Lock()
+        self._probe_pool: ThreadPoolExecutor | None = None
+
+    @property
+    def probe_pool(self) -> ThreadPoolExecutor:
+        """Long-lived version-probe pool (M2 Step 3: no per-scan churn)."""
+        if self._probe_pool is None:
+            self._probe_pool = ThreadPoolExecutor(
+                max_workers=MAX_PROBE_WORKERS, thread_name_prefix="rmadd-probe"
+            )
+        return self._probe_pool
+
+    def close(self):
+        """Release the probe pool; the scanner rebuilds it lazily on demand."""
+        if self._probe_pool is not None:
+            self._probe_pool.shutdown(wait=False)
+            self._probe_pool = None
 
     def _search_directories(self) -> list:
         dirs = []
@@ -101,12 +114,11 @@ class LocalBinaryScanner:
         rest = candidates[self._probe_limit :]
         versions = {}
         if to_probe:
-            workers = min(MAX_PROBE_WORKERS, len(to_probe))
-            with ThreadPoolExecutor(max_workers=workers) as ex:
-                for (name, path), version in zip(
-                    to_probe, ex.map(lambda item: self.probe_version(item[1]), to_probe)
-                ):
-                    versions[name] = version
+            pool = self.probe_pool
+            for (name, _path), version in zip(
+                to_probe, pool.map(lambda item: self.probe_version(item[1]), to_probe)
+            ):
+                versions[name] = version
         pkgs = []
         for name, path in to_probe:
             pkgs.append(self._make_package(name, path, versions[name], arch))
@@ -114,7 +126,7 @@ class LocalBinaryScanner:
             pkgs.append(self._make_package(name, path, FALLBACK_VERSION, arch))
         return pkgs
 
-    def find_path(self, name: str) -> Optional[str]:
+    def find_path(self, name: str) -> str | None:
         for _name, path in self.scan():
             if _name == name:
                 return path
@@ -178,10 +190,14 @@ class Adapter(BasePackageManager):
         super().__init__(PackageManager.LOCAL)
         self._scanner = LocalBinaryScanner(search_dirs, extra_path, version_timeout, probe_limit, scan_path)
 
+    def close(self):
+        """Release the scanner's probe pool."""
+        self._scanner.close()
+
     def list_installed(self) -> list:
         return self._scanner.list_packages()
 
-    def get_info(self, name: str) -> Optional[Package]:
+    def get_info(self, name: str) -> Package | None:
         for pkg in self.list_installed():
             if pkg.name == name:
                 return pkg

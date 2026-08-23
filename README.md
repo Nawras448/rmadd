@@ -7,7 +7,7 @@
 An all-in-one, modular Textual-based TUI application for Linux system
 monitoring and cross-distribution package management.
 
-> UNDER ACTIVE DEVELOPMENT (WIP). Structure and features change quickly.
+Current release: **v0.2.0** (see `CHANGELOG.md`).
 
 ---
 
@@ -41,6 +41,19 @@ monitoring and cross-distribution package management.
   asyncio.to_thread), debounced search, 5s stats refresh, TTL caches.
 * Flat package layout: everything lives under one `rmadd/` package - no DI
   container, no hexagonal indirection.
+* Rich operation feedback: streamed `OpResult` failure contexts
+  (auth-denied / timeout / cancelled / manager-missing) surfaced as typed
+  toasts plus a live status chip (`gen:N · k/M managers done · ms`) on the
+  search tab.
+* Batch operations with per-target isolation (`OpReport`): one failing
+  manager never drops the rest of the report; skipped targets are recorded,
+  never silently dropped.
+* Responsive tables: width-tiered column hiding behind a debounced resize
+  handler, with cursor/scroll locked across refreshes and profile switches.
+* Focus pipeline: modals capture focus on push and restore it verbatim on
+  dismissal; progress panels focus their Cancel button immediately.
+* Opt-in removal confirmation (`ui.confirm_removal`) and a single-keystroke
+  keybinding overlay (`?`).
 
 ## Visual Overview
 
@@ -91,18 +104,37 @@ and the logo is 180 px.
 main.py
   Entry point; builds services, selects UI mode (tui or cli).
 rmadd/
-  models.py                  PackageManager, Package, PackageCollection,
-                             SystemInfo and hardware dataclasses.
+  models.py                  PackageManager enum (27), tier metadata, Package,
+                             PackageCollection, SystemInfo and hardware dataclasses.
   state.py                   PackageStateBus - app-wide pub/sub bus with
                              pending/confirmed/reverted lifecycle phases.
-  package_managers/          BaseAdapter + discovery registry, plus one
-    base.py                  module per package manager and the service.
-    service.py               PackageManagerService: search/install/counts.
+  ui_keys.py                 Row-key codec shared by tables and screens.
+  controllers/
+    optimistic_state.py      Pure optimistic state machine (no UI imports):
+                             pending -> confirmed/reverted with verbatim
+                             restore of removed rows at their original index.
+    operations_controller.py Bus intake -> state deltas -> widget updates;
+                             owns start/settle/revert orchestration and
+                             manager rediscovery.
+    search_controller.py     Live multi-manager search, version enrichment,
+                             dynamic action bar.
+    installed_controller.py  Load/hydrate/filter, per-manager tab strip,
+                             15 s stale-reload policy.
+    local_binaries_controller.py  Opt-in PATH scan + deletion view.
+    tools_controller.py      Installer-tool catalog + AppImage installs.
+    stats_controller.py      System card + per-manager counts (5 s tick).
+  package_managers/
+    base.py                  BaseAdapter - streaming runner with two-phase
+                             deadlines (auth vs execution budget), pgid-directed
+                             process-group cleanup and OpResult failure contexts;
+                             discovery registry.
+    service.py               PackageManagerService: search/install/counts,
+                             batch runner (OpReport), thread pools, TTL caches.
     <manager>.py             one adapter per manager (apt, dnf, flatpak, ...)
     local.py                 opt-in PATH binary scanner + physical removal.
   screens/
-    store_screen.py          StoreScreen: the tabbed store screen; owns the
-                             optimistic lifecycle (instant removal + revert).
+    store_screen.py          StoreScreen: composition root wiring controllers
+                             to the widget tree (layout, bindings, events).
     widgets/                 PackageTable, ToolsTable, SystemCard.
     install_progress_screen.py, package_detail_screen.py,
     appimage_install_screen.py
@@ -112,7 +144,7 @@ rmadd/
   tools.py                   InstallerTool detection for the Tools tab.
   tui.py                     RmaddTuiApp (cyberpunk theme).
   cli.py                     info / packages / hardware subcommands.
-  config.py                  JSON config (ui.mode).
+  config.py                  JSON config (ui.mode, op_timeout_seconds).
   logging.py                 file logging setup.
 style.tcss                   Textual CSS stylesheet.
 docs/
@@ -156,7 +188,7 @@ echo '{"ui":{"mode":"tui"}}' > ~/.config/rmadd/config.json
 | F1 - F5  | Switch tab (Tools/Search/Installed/Local/About) |
 | i / r / u | Install / remove / update selected package |
 | Enter    | Open package detail                   |
-| r (app)  | Force refresh all stats               |
+| R (app)  | Force refresh all stats               |
 | q        | Quit                                  |
 
 ## Documentation

@@ -1,9 +1,10 @@
 """FlatpakAdapter adapter."""
 
 
-from typing import Optional
-from rmadd.models import Package, PackageManager, PackageStatus, Repo
+
+from rmadd.models import Package, PackageManager, Repo
 from rmadd.package_managers.base import BaseAdapter
+
 
 class Adapter(BaseAdapter):
     def __init__(self):
@@ -14,7 +15,8 @@ class Adapter(BaseAdapter):
         first = line.split("\t")[0].lower()
         if first not in ("name", "application"):
             return False
-        return any(w in line.lower() for w in ("application id", "description", "branch", "remotes", "options", "version"))
+        markers = ("application id", "description", "branch", "remotes", "options", "version")
+        return any(w in line.lower() for w in markers)
 
     def _iter_rows(self, out: str) -> list:
         lines = [ln for ln in out.split("\n") if ln.strip()]
@@ -42,7 +44,7 @@ class Adapter(BaseAdapter):
                 pkgs.append(Package(name=name, version=version, summary=summary, manager=self._manager))
         return pkgs
 
-    def get_info(self, name: str) -> Optional[Package]:
+    def get_info(self, name: str) -> Package | None:
         out = self._run(["flatpak", "info", name])
         if not out:
             return None

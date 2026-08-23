@@ -1,9 +1,10 @@
 """PipAdapter adapter."""
 
 import shutil
-from typing import Optional
-from rmadd.models import Package, PackageManager, PackageStatus, Repo
+
+from rmadd.models import Package, PackageManager
 from rmadd.package_managers.base import BaseAdapter
+
 
 class Adapter(BaseAdapter):
     def __init__(self):
@@ -19,7 +20,7 @@ class Adapter(BaseAdapter):
                 pkgs.append(Package(name=name.strip(), version=version.strip(), manager=self._manager))
         return pkgs
 
-    def get_info(self, name: str) -> Optional[Package]:
+    def get_info(self, name: str) -> Package | None:
         out = self._run([self._pip, "show", name])
         if not out:
             return None
