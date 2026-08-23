@@ -38,16 +38,12 @@ if ! python3 -m venv "$INSTALL_DIR/venv"; then
 fi
 
 "$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade pip
-"$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade git+https://github.com/Nawras448/rmadd.git
+"$INSTALL_DIR/venv/bin/pip" install --quiet --no-cache-dir --upgrade git+https://github.com/Nawras448/rmadd.git
 
 # ------------------------------------------------------------ launcher ---
 
 echo "🔧 Creating launcher..."
-cat > "$BIN_DIR/rmadd" <<WRAPPER
-#!/usr/bin/env bash
-exec "$HOME/.local/share/rmadd/venv/bin/python" -m rmadd "\$@"
-WRAPPER
-chmod +x "$BIN_DIR/rmadd"
+ln -sf "$INSTALL_DIR/venv/bin/rmadd" "$BIN_DIR/rmadd"
 
 echo "✅ rmadd installed successfully!"
 
