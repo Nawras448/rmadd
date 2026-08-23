@@ -146,7 +146,7 @@ rmadd/
   cli.py                     info / packages / hardware subcommands.
   config.py                  JSON config (confirm_removal, op_timeout_seconds).
   logging.py                 file logging setup.
-style.tcss                   Textual CSS stylesheet.
+rmadd/style.tcss             Textual CSS stylesheet.
 docs/
   LOCAL_BINARIES.md          Local binaries guide (discovery & deletion).
   assets/                    Logos, screenshots and demo GIFs.

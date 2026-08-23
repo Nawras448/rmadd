@@ -17,6 +17,11 @@ adheres to [Semantic Versioning](https://semver.org/).
 - Root `python main.py` is now a thin delegator to `rmadd.main`; the
   bootstrap lives inside the package so `python -m rmadd` works.
 
+### Fixed
+- `StylesheetError` after installation: `style.tcss` moved into the
+  `rmadd` package (`rmadd/style.tcss`), `CSS_PATH` made package-relative,
+  and the file bundled via setuptools package-data.
+
 ### Added
 - `[project.scripts]` entry point (`rmadd`) in `pyproject.toml`.
 - Hardened `install.sh`: prerequisite checks for `python3`,

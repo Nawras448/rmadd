@@ -28,7 +28,7 @@ Everything lives in the `rmadd/` package plus a thin `main.py` entry point.
 | `rmadd/screens/help_overlay.py` | `?` keybinding overlay (`ModalScreen`). |
 | `rmadd/screens/confirm_remove.py` | Opt-in removal confirmation modal (y/n). |
 | `rmadd/screens/op_feedback.py` | `OpResult` -> toast severity/message + result-pane markup. |
-| `style.tcss` | Textual CSS stylesheet (root). |
+| `rmadd/style.tcss` | Textual CSS stylesheet (shipped as package data). |
 
 Package/tools tables embed a `ResponsiveMixin`: trailing-edge debounced
 resize with width-tiered column hiding, cursor-locked profile switches and

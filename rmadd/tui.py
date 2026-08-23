@@ -1,7 +1,5 @@
 """Textual TUI application for rmadd."""
 
-import os
-
 from textual.app import App
 from textual.binding import Binding
 from textual.theme import Theme
@@ -10,7 +8,7 @@ from rmadd import __version__
 from rmadd.screens.store_screen import StoreScreen
 from rmadd.state import PackageStateBus
 
-_CSS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "style.tcss")
+CSS_PATH = "style.tcss"  # resolved relative to this module inside the package
 
 CYBERPUNK_THEME = Theme(
     name="cyberpunk",
@@ -53,7 +51,7 @@ class RmaddTuiApp(App):
     TITLE = f"rmadd v{__version__}"
     SUB_TITLE = "Package & System Monitor"
 
-    CSS_PATH = _CSS
+    CSS_PATH = "style.tcss"
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),

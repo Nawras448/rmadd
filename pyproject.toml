@@ -39,6 +39,9 @@ rmadd = "rmadd.main:main"
 [tool.setuptools]
 packages = ["rmadd", "rmadd.controllers", "rmadd.package_managers", "rmadd.screens", "rmadd.screens.widgets"]
 
+[tool.setuptools.package-data]
+rmadd = ["*.tcss"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py310"

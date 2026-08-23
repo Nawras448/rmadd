@@ -13,3 +13,8 @@ __pycache__/
 *.pwi
 tmp/
 .opencode/
+
+# python build artifacts
+build/
+dist/
+*.egg-info/
