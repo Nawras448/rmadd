@@ -6,19 +6,48 @@ BIN_DIR="$HOME/.local/bin"
 
 echo "🚀 Installing rmadd..."
 
-if ! command -v python3 &> /dev/null; then
-    echo "❌ Error: python3 is required."
+# ------------------------------------------------------ prerequisites ----
+
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "❌ python3 is required."
+    echo "   Install it with: sudo apt install python3"
+    exit 1
+fi
+
+if ! python3 -m venv --help >/dev/null 2>&1; then
+    echo "❌ python3 venv support is missing."
+    echo "   Install it with: sudo apt install python3-venv"
+    exit 1
+fi
+
+if ! command -v git >/dev/null 2>&1; then
+    echo "❌ git is required (the package is installed from its Git repository)."
+    echo "   Install it with: sudo apt install git"
     exit 1
 fi
 
 mkdir -p "$INSTALL_DIR" "$BIN_DIR"
 
-echo "📦 Creating isolated environment & installing..."
-python3 -m venv "$INSTALL_DIR/venv"
-"$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade pip
-"$INSTALL_DIR/venv/bin/pip" install --quiet git+https://github.com/Nawras448/rmadd.git
+# ------------------------------------------- environment & installation --
 
-ln -sf "$INSTALL_DIR/venv/bin/rmadd" "$BIN_DIR/rmadd"
+echo "📦 Creating isolated environment & installing..."
+if ! python3 -m venv "$INSTALL_DIR/venv"; then
+    echo "❌ Failed to create the virtual environment."
+    echo "   On Debian/Ubuntu this usually means: sudo apt install python3-venv"
+    exit 1
+fi
+
+"$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade pip
+"$INSTALL_DIR/venv/bin/pip" install --quiet --upgrade git+https://github.com/Nawras448/rmadd.git
+
+# ------------------------------------------------------------ launcher ---
+
+echo "🔧 Creating launcher..."
+cat > "$BIN_DIR/rmadd" <<WRAPPER
+#!/usr/bin/env bash
+exec "$HOME/.local/share/rmadd/venv/bin/python" -m rmadd "\$@"
+WRAPPER
+chmod +x "$BIN_DIR/rmadd"
 
 echo "✅ rmadd installed successfully!"
 

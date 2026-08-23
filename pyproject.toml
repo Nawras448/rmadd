@@ -33,6 +33,9 @@ dev = [
     "mypy>=1.10",
 ]
 
+[project.scripts]
+rmadd = "rmadd.main:main"
+
 [tool.setuptools]
 packages = ["rmadd", "rmadd.controllers", "rmadd.package_managers", "rmadd.screens", "rmadd.screens.widgets"]
 
