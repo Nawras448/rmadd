@@ -1,9 +1,8 @@
-"""Application bootstrap: builds services and dispatches TUI/CLI."""
+"""Application bootstrap: builds services and dispatches TUI/CLI by argv."""
 
 import sys
 
 from rmadd.cache import CachingHardwareAdapter, CachingSystemAdapter
-from rmadd.config import Config
 from rmadd.hardware import HardwareMonitorService, ProcFsAdapter
 from rmadd.logging import get_logger, setup_logging
 from rmadd.package_managers.base import discover_managers
@@ -23,31 +22,31 @@ def build_app():
     return system_service, package_service, hardware_service
 
 
-def main():
-    setup_logging()
-    logger = get_logger("main")
-    logger.info("Starting rmadd")
+def main(argv: list[str] | None = None) -> None:
+    """Dispatch on argument presence: bare invocation launches the TUI.
 
-    config = Config()
+    ``argv`` defaults to ``sys.argv[1:]`` and is injectable for tests.
+    Any arguments (subcommands or flags such as ``--help``) are handed to
+    the CLI parser.
+    """
+    args = list(sys.argv[1:] if argv is None else argv)
+
+    setup_logging()
+    get_logger("main").info("Starting rmadd")
+
     system_service, package_service, hardware_service = build_app()
 
-    ui_mode = config.ui_mode
-
-    if ui_mode == "tui":
-        from rmadd.tui import RmaddTuiApp
-        app = RmaddTuiApp(system_service, package_service, hardware_service)
-        app.run()
-
-    elif ui_mode == "cli":
+    if args:
         from rmadd.cli import CliApp
-        cli = CliApp(system_service, package_service, hardware_service)
-        cli.run(sys.argv[1:])
 
-    else:
-        logger.warning(f"GUI mode is not implemented; falling back to TUI (got ui_mode={ui_mode!r})")
-        from rmadd.tui import RmaddTuiApp
-        app = RmaddTuiApp(system_service, package_service, hardware_service)
-        app.run()
+        cli = CliApp(system_service, package_service, hardware_service)
+        cli.run(args)
+        return
+
+    from rmadd.tui import RmaddTuiApp
+
+    app = RmaddTuiApp(system_service, package_service, hardware_service)
+    app.run()
 
 
 if __name__ == "__main__":

@@ -4,6 +4,26 @@ All notable changes to rmadd are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project
 adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+- **Dispatch is now argument-driven:** bare `rmadd` / `python -m rmadd`
+  always launches the interactive TUI; any arguments (`info`, `packages`,
+  `hardware`, `--help`, unknown commands) route to the CLI parser with
+  standard exit codes. The legacy `ui.mode` config key is no longer
+  consulted for dispatch (it previously forced bare invocations into the
+  argparse help view).
+- `main()` accepts an optional `argv` list for hermetic dispatch testing.
+- Root `python main.py` is now a thin delegator to `rmadd.main`; the
+  bootstrap lives inside the package so `python -m rmadd` works.
+
+### Added
+- `[project.scripts]` entry point (`rmadd`) in `pyproject.toml`.
+- Hardened `install.sh`: prerequisite checks for `python3`,
+  `python3-venv` (probe plus runtime venv-creation guard) and `git` with
+  actionable apt guidance; launcher wrapper executes the package via
+  `python -m rmadd "$@"` from the isolated venv.
+
 ## [0.2.0] - 2026-08-23
 
 First hardened release: correctness fixes, controller decomposition,

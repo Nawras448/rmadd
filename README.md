@@ -102,7 +102,7 @@ and the logo is 180 px.
 
 ```text
 main.py
-  Entry point; builds services, selects UI mode (tui or cli).
+  Backward-compatible entry point delegating to `rmadd.main`.
 rmadd/
   models.py                  PackageManager enum (27), tier metadata, Package,
                              PackageCollection, SystemInfo and hardware dataclasses.
@@ -144,7 +144,7 @@ rmadd/
   tools.py                   InstallerTool detection for the Tools tab.
   tui.py                     RmaddTuiApp (cyberpunk theme).
   cli.py                     info / packages / hardware subcommands.
-  config.py                  JSON config (ui.mode, op_timeout_seconds).
+  config.py                  JSON config (confirm_removal, op_timeout_seconds).
   logging.py                 file logging setup.
 style.tcss                   Textual CSS stylesheet.
 docs/
@@ -162,20 +162,18 @@ curl -L https://github.com/Nawras448/rmadd/archive/refs/heads/main.tar.gz | tar 
 ## Usage
 
 ```bash
-pip install -r requirements.txt # 3. Setting the requirements
-python main.py                  # TUI (default)
+pip install -r requirements.txt
+python3 main.py                 # bare invocation opens the TUI
+rmadd                           # same, via the installed launcher
 
-# CLI mode
-echo '{"ui":{"mode":"cli"}}' > ~/.config/rmadd/config.json
-python main.py info
-python main.py packages
-python main.py hardware
-```
-
-Reset to TUI mode:
+Any arguments route to the CLI subcommands -- no config switch required:
 
 ```bash
-echo '{"ui":{"mode":"tui"}}' > ~/.config/rmadd/config.json
+rmadd info                      # system info
+rmadd packages                  # per-manager package counts
+rmadd hardware                  # CPU / memory summary
+rmadd --help                    # usage
+python3 -m rmadd packages       # module form works too
 ```
 
 * Config file: `~/.config/rmadd/config.json`

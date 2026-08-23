@@ -8,8 +8,8 @@ Everything lives in the `rmadd/` package plus a thin `main.py` entry point.
 
 | File | Role |
 |---|---|
-| `main.py` | Builds the three services directly (no DI container), dispatches to tui/cli via `config.ui_mode`. |
-| `rmadd/config.py` | JSON config at `~/.config/rmadd/config.json` (`ui.mode`: tui or cli; `package_managers.op_timeout_seconds`: execution budget; `ui.confirm_removal`: opt-in removal confirmation). |
+| `main.py` | Backward-compatible entry point delegating to `rmadd.main`. |
+| `rmadd/config.py` | JSON config at `~/.config/rmadd/config.json` (`package_managers.op_timeout_seconds`: execution budget; `ui.confirm_removal`: opt-in removal confirmation). |
 | `rmadd/logging.py` | Logs to `~/.local/share/rmadd/logs/app.log`. |
 | `rmadd/state.py` | `PackageStateBus` - app-wide pub/sub bus. |
 
@@ -75,8 +75,8 @@ main.py
   system_service   = SystemInfoService(CachingSystemAdapter(HostnamectlAdapter()))
   hardware_service = HardwareMonitorService(CachingHardwareAdapter(ProcFsAdapter()))
   package_service  = PackageManagerService(dict(discover_managers()))
-  ui_mode == "tui" -> RmaddTuiApp(system, package, hardware).run()
-  ui_mode == "cli" -> CliApp(system, package, hardware).run(sys.argv[1:])
+  argv empty            -> RmaddTuiApp(system, package, hardware).run()
+  argv present/--help   -> CliApp(system, package, hardware).run(argv)
 ```
 
 1. **Read path (off the UI thread):** StoreScreen calls services via
